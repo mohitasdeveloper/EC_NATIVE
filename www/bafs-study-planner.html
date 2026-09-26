@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Study Planner</title>
+
+<!-- Same-origin as the main app, so localStorage is shared — read its
+     'theme' key directly (same key/fallback logic as index.html) rather
+     than needing any cross-frame messaging. Runs before anything else so
+     there's no flash of the wrong theme. -->
+<script>
+(function () {
+    try {
+        const applyTheme = () => {
+            const isDark = localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);
+            document.documentElement.classList.toggle('dark', isDark);
+        };
+        applyTheme();
+        // Same-origin iframe shares localStorage with the parent, so if the
+        // theme is toggled while this page is already loaded in the
+        // background (Search tab not currently active), this keeps it in
+        // sync rather than waiting for a fresh reload to pick it up.
+        window.addEventListener('storage', (e) => { if (e.key === 'theme') applyTheme(); });
+    } catch (e) { /* localStorage unavailable — default to light */ }
+})();
+</script>
+
+<!-- Google Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Google+Sans+Display:wght@400;500;700&family=Roboto:wght@300;400;500;700&family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet" />
+<script>
+// Marks <html> once the icon font is actually ready, so the shimmer CSS above
+// knows when to stop. Runs as early as possible (right after the font <link>)
+// rather than waiting for the rest of the page to parse.
+(function () {
+  var done = false;
+  function markLoaded() {
+    if (done) return;
+    done = true;
+    document.documentElement.classList.add('fonts-loaded');
+  }
+  if (window.document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(markLoaded).catch(markLoaded);
+  }
+  setTimeout(markLoaded, 3000); // safety net — never shimmer forever if font loading stalls or the API is unsupported
+})();
+</script>
+
+<!-- Supabase JS SDK -->
+<!-- NOT deferred on purpose: the inline script below reads window.supabase
+     synchronously at the top of its own (non-deferred) block, so it must
+     stay in the same execution phase as this tag. This page is a
+     secondary, on-demand feature (not on the app's launch/splash path),
+     so it isn't part of the startup-performance fix. -->
+<script src="vendor/supabase.js"></script>
+
+<!-- Shared in-app PDF viewer (full-screen, continuous-scroll, locked down —
+     no download/export). Lazy-loads pdf.js itself. -->
+<script src="pdf-viewer.js" defer></script>
+
+<style>
+/* ══════════════════════════════════════
+   MATERIAL SYMBOLS SETUP
+══════════════════════════════════════ */
+.msr {
+  font-family: 'Material Symbols Rounded'; font-weight: normal; font-style: normal;
+  font-size: 24px; line-height: 1; letter-spacing: normal; text-transform: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  white-space: nowrap; word-wrap: normal; direction: ltr;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  user-select: none;
+}
+.msr.fill   { font-variation-settings: 'FILL' 1, 'wght' 400; }
+.msr.w300   { font-variation-settings: 'FILL' 0, 'wght' 300; }
+.msr.w500   { font-variation-settings: 'FILL' 0, 'wght' 500; }
+.msr.s20    { font-size: 20px; font-variation-settings: 'opsz' 20; }
+.msr.s18    { font-size: 18px; font-variation-settings: 'opsz' 20; }
+.msr.s28    { font-size: 28px; font-variation-settings: 'wght' 300, 'opsz' 40; }
+.msr.fill-w5{ font-variation-settings: 'FILL' 1, 'wght' 500; }
+
+/* Icon-font loading shimmer — until Material Symbols finishes loading, .msr
+   icons would otherwise briefly render as raw fallback text (e.g. "search",
+   "calendar_month"). html.fonts-loaded is added by the script in <head> once
+   the font is actually ready; until then this shows a shimmer placeholder
+   sized to the icon's own box instead, reusing the same shimmer gradient as
+   .shimmer-bg elsewhere in this file. */
+html:not(.fonts-loaded) .msr {
+  color: transparent;
+  width: 1em; height: 1em;
+  border-radius: 4px;
+  background-color: #f1f3f4;
+  background-image: linear-gradient(90deg, #f1f3f4 0px, #e8eaed 40px, #f1f3f4 80px);
+  background-size: 600px 100%;
+  animation: shimmer-anim 1.5s infinite linear;
+}
+
+/* ══════════════════════════════════════
+   DESIGN TOKENS (Updated to Logo Theme)
+══════════════════════════════════════ */
+:root {
+  --md-primary:        #D81B60; /* Vibrant Pink/Red */
+  --md-primary-dim:    #FCE4EC;
+  --md-primary-text:   #C2185B;
+  --md-secondary:      #F5B041; /* Warm Yellow/Orange */
+  --md-surface:        #FFFFFF;
+  --md-bg:             #F8F9FA;
+  --md-on-surface:     #202124;
+  --md-on-surface-var: #5F6368;
+  --md-outline:        #DADCE0;
+  --md-error:          #EA4335;
+  --safe-b:            env(safe-area-inset-bottom, 0px);
+  --radius-sm:         8px;
+  --radius-md:         12px;
+  --radius-xl:         20px;
+  --radius-full:       999px;
+  --shadow-1: 0 1px 2px rgba(60,64,67,.3), 0 1px 3px 1px rgba(60,64,67,.15);
+  --shadow-2: 0 1px 2px rgba(60,64,67,.3), 0 2px 6px 2px rgba(60,64,67,.15);
+  --ease: cubic-bezier(.2,0,0,1);
+}
+
+/* Same palette shape as the main app's dark mode (same --md-bg value as
+   its #121212, for consistency at the seam between the two documents). */
+:root.dark {
+  --md-primary:        #FF4081;
+  --md-primary-dim:    #3D1A2B;
+  --md-primary-text:   #FF80AB;
+  --md-secondary:      #F5B041;
+  --md-surface:        #1E1E1E;
+  --md-bg:             #121212;
+  --md-on-surface:     #E8EAED;
+  --md-on-surface-var: #9AA0A6;
+  --md-outline:        #3C4043;
+  --md-error:          #F28B82;
+  --shadow-1: 0 1px 2px rgba(0,0,0,.5), 0 1px 3px 1px rgba(0,0,0,.3);
+  --shadow-2: 0 1px 2px rgba(0,0,0,.5), 0 2px 6px 2px rgba(0,0,0,.3);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+button, input { border: none; background: none; font: inherit; outline: none; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #E8EAED; display: flex; justify-content: center; align-items: center; font-family: 'Roboto', sans-serif; -webkit-tap-highlight-color: transparent; }
+html.dark, html.dark body { background: #000; }
+
+#app {
+  position: relative; width: 100%; max-width: 412px; height: 100%; max-height: 915px;
+  background: var(--md-bg); display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 8px 40px rgba(0,0,0,.28);
+}
+@media (min-height: 916px) and (min-width: 413px) { #app { border-radius: 28px; } }
+
+#body { flex: 1; overflow-y: auto; overflow-x: hidden; padding-bottom: calc(var(--safe-b) + 24px); background: var(--md-bg); }
+#body::-webkit-scrollbar { display: none; }
+
+.view { display: none; }
+.view.active { display: block; animation: fadein .22s var(--ease); }
+@keyframes fadein { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ══════════════════════════════
+   GLOBAL SEARCH VIEW
+══════════════════════════════ */
+.search-header {
+  display: flex; align-items: center; padding: 8px 16px; gap: 12px;
+  background: var(--md-surface); border-bottom: 1px solid var(--md-outline);
+  height: 64px; position: sticky; top: 0; z-index: 20;
+}
+.icon-btn { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background .15s; }
+.icon-btn:active { background: rgba(32,33,36,.1); }
+#search-input { flex: 1; font-size: 16px; color: var(--md-on-surface); font-family: 'Roboto', sans-serif; height: 100%; }
+#search-input::placeholder { color: var(--md-on-surface-var); }
+
+/* ══════════════════════════════
+   SHIMMER LOADING EFFECT
+══════════════════════════════ */
+@keyframes shimmer-anim { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.shimmer-bg { background-color: #f1f3f4; background-image: linear-gradient(90deg, #f1f3f4 0px, #e8eaed 40px, #f1f3f4 80px); background-size: 600px 100%; animation: shimmer-anim 1.5s infinite linear; }
+.shimmer-bg-dark { background-color: rgba(255,255,255,0.1); background-image: linear-gradient(90deg, rgba(255,255,255,0.1) 0px, rgba(255,255,255,0.2) 40px, rgba(255,255,255,0.1) 80px); background-size: 600px 100%; animation: shimmer-anim 1.5s infinite linear; }
+:root.dark .shimmer-bg { background-color: #2a2a2a; background-image: linear-gradient(90deg, #2a2a2a 0px, #3a3a3a 40px, #2a2a2a 80px); background-size: 600px 100%; }
+
+/* ══════════════════════════════
+   COMPONENTS
+══════════════════════════════ */
+.g-search { margin: 16px 16px 0; background: var(--md-surface); border-radius: var(--radius-full); height: 52px; display: flex; align-items: center; padding: 0 16px; gap: 10px; box-shadow: var(--shadow-1); cursor: pointer; }
+.g-search .msr { color: var(--md-on-surface-var); font-size: 22px; flex-shrink: 0; }
+.g-search-text { flex: 1; font-size: 16px; color: var(--md-on-surface-var); pointer-events: none; }
+
+.chip-row { display: flex; gap: 8px; padding: 12px 16px 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.chip-row::-webkit-scrollbar { display: none; }
+.md-chip { flex-shrink: 0; height: 32px; padding: 0 12px 0 10px; border: 1px solid var(--md-outline); border-radius: var(--radius-full); background: var(--md-surface); display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--md-on-surface); cursor: pointer; white-space: nowrap; }
+.md-chip.active { background: var(--md-primary-dim); border-color: var(--md-primary); color: var(--md-primary-text); }
+.md-chip.active .msr { color: var(--md-primary); font-variation-settings: 'FILL' 1, 'wght' 500; }
+
+.sec-head { display: flex; align-items: center; justify-content: space-between; padding: 20px 16px 8px; }
+.sec-head-title { font-size: 11px; font-weight: 600; color: var(--md-on-surface-var); letter-spacing: 1px; text-transform: uppercase; }
+.sec-head-action { font-size: 13px; font-weight: 500; color: var(--md-primary); cursor: pointer; padding: 4px 8px; border-radius: var(--radius-sm); display: flex; align-items: center; gap: 2px; }
+
+.countdown-card { background: var(--md-surface); border-radius: var(--radius-xl); margin: 0 16px; overflow: hidden; box-shadow: var(--shadow-1); }
+/* Themed Gradient Banner */
+.cd-banner { background: linear-gradient(135deg, #D81B60 0%, #FF8F00 100%); padding: 16px 20px 14px; }
+.cd-banner-eyebrow { display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; color: rgba(255,255,255,.9); letter-spacing: 1.2px; text-transform: uppercase; margin-bottom: 6px; }
+.cd-widget-btn { margin-left: auto; width: 24px; height: 24px; border-radius: 50%; background: rgba(255,255,255,.22); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.cd-widget-btn .msr { color: #fff; font-size: 14px; }
+.cd-widget-btn:active { background: rgba(255,255,255,.35); }
+.cd-banner-name { font-family: 'Google Sans', sans-serif; font-size: 17px; font-weight: 500; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 3px; }
+.cd-banner-meta { font-size: 12px; color: rgba(255,255,255,.85); display: flex; align-items: center; gap: 6px; }
+.cd-body { padding: 16px 20px 18px; }
+.cd-tiles { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; }
+.cd-tile { background: var(--md-primary-dim); border-radius: var(--radius-md); padding: 12px 4px; text-align: center; }
+.cd-num { font-family: 'Google Sans Display', sans-serif; font-size: 30px; font-weight: 700; color: var(--md-primary); line-height: 1; }
+.cd-unit { font-size: 10px; font-weight: 600; color: var(--md-primary-text); text-transform: uppercase; margin-top: 4px; }
+.cd-progress-row { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+.cd-track { flex: 1; height: 4px; background: var(--md-primary-dim); border-radius: var(--radius-full); overflow: hidden; }
+.cd-fill { height: 100%; background: var(--md-primary); border-radius: var(--radius-full); transition: width 1s linear; }
+.cd-pct { font-size: 12px; font-weight: 500; color: var(--md-primary); }
+
+.exam-list { padding: 0 16px; display: flex; flex-direction: column; gap: 8px; }
+.exam-card { background: var(--md-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-1); display: flex; align-items: center; padding: 12px 12px 12px 16px; gap: 14px; cursor: pointer; position: relative; overflow: hidden; }
+.exam-card.done { opacity: .6; }
+.ec-date { width: 48px; height: 48px; border-radius: var(--radius-md); display: flex; flex-direction: column; align-items: center; justify-content: center; flex-shrink: 0; }
+.ec-day { font-family: 'Google Sans', sans-serif; font-size: 20px; font-weight: 700; line-height: 1; }
+.ec-month { font-size: 10px; font-weight: 600; text-transform: uppercase; margin-top: 1px; }
+.ec-info { flex: 1; min-width: 0; }
+.ec-paper { font-family: 'Google Sans', sans-serif; font-size: 14px; font-weight: 500; color: var(--md-on-surface); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ec-sub { font-size: 12px; color: var(--md-on-surface-var); margin-top: 2px; }
+.ec-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
+.ec-cred { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: var(--radius-full); }
+.pulse-dot { width: 8px; height: 8px; border-radius: 50%; }
+
+.quick-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; padding: 0 16px; }
+.qg-card { background: var(--md-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-1); padding: 16px 8px 14px; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; position: relative; overflow: hidden; }
+.qg-icon { width: 48px; height: 48px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; }
+.qg-label { font-size: 11px; font-weight: 500; color: var(--md-on-surface); text-align: center; line-height: 1.3; }
+
+.view-strip { padding: 20px 16px 18px; position: relative; }
+.vs-top-row { display: flex; align-items: flex-start; justify-content: space-between; }
+.vs-eyebrow { font-size: 11px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase; margin-bottom: 4px; opacity: .9; }
+.vs-title { font-family: 'Google Sans Display', sans-serif; font-size: 28px; font-weight: 700; line-height: 1.1; }
+.vs-sub { font-size: 13px; margin-top: 6px; opacity: .9; }
+
+.tt-list { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+.tt-card { background: var(--md-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-1); overflow: hidden; cursor: pointer; position: relative; }
+.tt-inner { display: flex; }
+.tt-bar { width: 4px; flex-shrink: 0; }
+.tt-body { flex: 1; padding: 14px; }
+.tt-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.tt-paper { font-family: 'Google Sans', sans-serif; font-size: 15px; font-weight: 500; color: var(--md-on-surface); flex: 1; line-height: 1.4; }
+.tt-badge { flex-shrink: 0; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: var(--radius-full); }
+.tt-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.tt-chip { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 4px 10px; border-radius: var(--radius-full); }
+
+.sub-tabs { background: var(--md-surface); border-bottom: 1px solid var(--md-outline); display: flex; overflow-x: auto; position: sticky; top: 0; z-index: 10; }
+.sub-tabs::-webkit-scrollbar { display: none; }
+.sub-tab { flex-shrink: 0; padding: 14px 16px; font-size: 14px; font-weight: 500; color: var(--md-on-surface-var); cursor: pointer; border-bottom: 3px solid transparent; transition: color .15s; }
+.sub-tab.active { color: var(--md-primary); border-bottom-color: var(--md-primary); }
+
+.list-section { padding: 8px 16px; display: flex; flex-direction: column; gap: 8px; }
+.g-item { background: var(--md-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-1); display: flex; align-items: center; gap: 14px; padding: 14px 16px; cursor: pointer; position: relative; overflow: hidden; }
+.gi-lead { width: 40px; height: 40px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.gi-body { flex: 1; min-width: 0; }
+.gi-title { font-family: 'Google Sans', sans-serif; font-size: 14px; font-weight: 500; color: var(--md-on-surface); line-height: 1.4; }
+.gi-sub { font-size: 12px; color: var(--md-on-surface-var); margin-top: 2px; }
+.gi-trail { flex-shrink: 0; color: var(--md-on-surface-var); }
+
+.g-accordion { padding: 0 16px; display: flex; flex-direction: column; gap: 6px; }
+.g-acc { background: var(--md-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-1); overflow: hidden; }
+.g-acc-hd { display: flex; align-items: center; gap: 12px; padding: 14px 16px; cursor: pointer; }
+.g-acc-lead { width: 36px; height: 36px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.g-acc-info { flex: 1; min-width: 0; }
+.g-acc-title { font-family: 'Google Sans', sans-serif; font-size: 14px; font-weight: 500; color: var(--md-on-surface); }
+.g-acc-count { font-size: 12px; color: var(--md-on-surface-var); margin-top: 1px; }
+.g-acc-chevron { flex-shrink: 0; color: var(--md-on-surface-var); transition: transform .25s; }
+.g-acc.open .g-acc-chevron { transform: rotate(180deg); }
+.g-acc-body { max-height: 0; overflow: hidden; transition: max-height .3s; }
+.g-acc.open .g-acc-body { max-height: 800px; border-top: 1px solid var(--md-outline); }
+.g-acc-topic { display: flex; align-items: flex-start; gap: 10px; padding: 10px 16px 10px 68px; border-bottom: 1px solid var(--md-outline); font-size: 13px; color: var(--md-on-surface-var); }
+
+.notes-wrap { padding: 0 16px; display: flex; flex-direction: column; gap: 8px; }
+.note-card { background: var(--md-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-1); display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; position: relative; overflow: hidden; }
+.note-strip { width: 4px; border-radius: var(--radius-full); align-self: stretch; flex-shrink: 0; }
+.note-icon { width: 44px; height: 44px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.note-body { flex: 1; min-width: 0; }
+.note-title { font-family: 'Google Sans', sans-serif; font-size: 14px; font-weight: 500; color: var(--md-on-surface); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note-meta { font-size: 12px; color: var(--md-on-surface-var); margin-top: 3px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.note-pill { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: var(--radius-full); }
+
+.year-scroller { display: flex; gap: 8px; padding: 12px 16px; overflow-x: auto; background: var(--md-surface); border-bottom: 1px solid var(--md-outline); }
+.year-scroller::-webkit-scrollbar { display: none; }
+.y-chip { flex-shrink: 0; padding: 6px 16px; border-radius: var(--radius-full); font-size: 13px; font-weight: 500; border: 1px solid var(--md-outline); background: var(--md-surface); color: var(--md-on-surface); cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.y-chip.active { background: var(--md-error); color: #fff; border-color: var(--md-error); }
+.y-chip.active .msr { color: #fff; }
+
+#snackbar { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(16px); background: #303030; color: #fff; padding: 12px 20px; border-radius: var(--radius-sm); font-size: 14px; opacity: 0; transition: all .25s var(--ease); pointer-events: none; white-space: nowrap; box-shadow: 0 3px 8px rgba(0,0,0,.35); z-index: 999; display: flex; align-items: center; gap: 8px; }
+#snackbar.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+@keyframes ripple { to { transform: scale(2.5); opacity: 0; } }
+@keyframes ring { 0%,100% { box-shadow: 0 0 0 0 rgba(216,27,96,.55); } 60% { box-shadow: 0 0 0 7px rgba(216,27,96,0); } }
+.pulse { animation: ring 2.2s infinite; }
+.pb16 { padding-bottom: 16px; }
+.empty-state { text-align: center; padding: 30px 16px; color: var(--md-on-surface-var); font-size: 14px; background: var(--md-surface); border-radius: var(--radius-xl); box-shadow: var(--shadow-1); margin: 0 16px; }
+/* ══════════════════════════════════════
+   VERIFIED-ONLY GATE (blurred preview + unlock card)
+══════════════════════════════════════ */
+#app.locked #body { filter: blur(11px) saturate(.85); transform: scale(1.03); pointer-events: none; user-select: none; -webkit-user-select: none; overflow: hidden; }
+#gate {
+  position: absolute; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center;
+  padding: 24px calc(24px) calc(24px + var(--safe-b));
+  background:
+    radial-gradient(120% 70% at 50% 0%, rgba(245,176,65,.20), transparent 62%),
+    linear-gradient(180deg, rgba(255,255,255,.30), rgba(248,249,250,.70));
+  -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px);
+}
+:root.dark #gate {
+  background:
+    radial-gradient(120% 70% at 50% 0%, rgba(245,176,65,.16), transparent 62%),
+    linear-gradient(180deg, rgba(18,18,18,.40), rgba(18,18,18,.82));
+}
+#app.locked #gate { display: flex; animation: gateIn .4s var(--ease); }
+#app.unlocking #gate { display: flex; opacity: 0; transition: opacity .35s var(--ease); pointer-events: none; }
+@keyframes gateIn { from { opacity: 0; } to { opacity: 1; } }
+
+.gate-card {
+  position: relative; width: 100%; max-width: 320px; text-align: center; overflow: hidden;
+  padding: 30px 22px 22px; border-radius: 28px;
+  background: rgba(255,255,255,.86); border: 1px solid rgba(245,176,65,.40);
+  box-shadow: 0 24px 60px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.7);
+  animation: gateRise .5s var(--ease);
+}
+:root.dark .gate-card { background: rgba(30,30,30,.88); border-color: rgba(245,176,65,.32); box-shadow: 0 24px 60px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.06); }
+@keyframes gateRise { from { transform: translateY(14px) scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
+.gate-card::before { /* soft gold halo behind the badge */
+  content: ''; position: absolute; top: -70px; left: 50%; width: 220px; height: 220px; transform: translateX(-50%);
+  background: radial-gradient(circle, rgba(245,176,65,.35), transparent 65%); pointer-events: none;
+}
+.gate-badge {
+  position: relative; width: 68px; height: 68px; margin: 0 auto 16px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(145deg, #FFE39A 0%, #F5B041 55%, #DE8A00 100%);
+  box-shadow: 0 8px 22px rgba(222,138,0,.45), inset 0 2px 0 rgba(255,255,255,.55);
+}
+.gate-badge .msr { font-size: 32px; color: #fff; font-variation-settings: 'FILL' 1, 'wght' 500; text-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.gate-eyebrow { position: relative; font-size: 10.5px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; color: #B06000; margin-bottom: 6px; }
+:root.dark .gate-eyebrow { color: #F5B041; }
+.gate-title { position: relative; font-family: 'Google Sans', sans-serif; font-size: 21px; font-weight: 700; color: var(--md-on-surface); line-height: 1.25; }
+.gate-sub { position: relative; font-size: 13.5px; line-height: 1.5; color: var(--md-on-surface-var); margin: 8px 0 14px; }
+.gate-perks { position: relative; display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-bottom: 18px; }
+.gate-perks span { font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 999px; color: #8A4B00; background: rgba(245,176,65,.18); border: 1px solid rgba(245,176,65,.35); }
+:root.dark .gate-perks span { color: #F9CF87; background: rgba(245,176,65,.12); }
+.gate-btn {
+  position: relative; overflow: hidden; width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px 16px; border-radius: 999px; cursor: pointer; color: #fff;
+  font-family: 'Google Sans', sans-serif; font-size: 15px; font-weight: 700; letter-spacing: .01em;
+  background: linear-gradient(135deg, var(--md-primary), #FF6F91);
+  box-shadow: 0 10px 24px rgba(216,27,96,.35); transition: transform .15s var(--ease);
+}
+.gate-btn:active { transform: scale(.97); }
+.gate-btn .msr { font-size: 20px; color: #fff; }
+.gate-btn::after { /* slow shine sweep */
+  content: ''; position: absolute; top: 0; bottom: 0; width: 40%; left: -60%;
+  background: linear-gradient(100deg, transparent, rgba(255,255,255,.45), transparent);
+  animation: gateShine 3.2s ease-in-out infinite;
+}
+@keyframes gateShine { 0% { left: -60%; } 55%, 100% { left: 130%; } }
+.gate-foot { position: relative; margin-top: 12px; font-size: 11.5px; color: var(--md-on-surface-var); }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div id="body">
+    
+    <!-- ─── HOME ─── -->
+    <div class="view active" id="view-home">
+      <!-- Search bar + chip row (Schedule/Countdown/Q.Bank/Notes/Pattern) removed —
+           this app is embedded inside a parent app that already has its own
+           search bar, and having a second one made this look like a separate
+           app pasted in rather than part of the same UI. The #view-search
+           screen and chipClick()/navTo() logic are left fully intact — new
+           navigation into these sections just needs a different entry point
+           than this removed header. -->
+
+      <div class="sec-head">
+        <div class="sec-head-title">Next Exam</div>
+        <div class="sec-head-action" onclick="navTo('tt')">See all<span class="msr">chevron_right</span></div>
+      </div>
+      <div class="countdown-card">
+        <div class="cd-banner">
+          <div class="cd-banner-eyebrow"><span class="msr">timer</span>Countdown<span class="cd-widget-btn" onclick="addCountdownWidget()" title="Add countdown widget to home screen"><span class="msr">widgets</span></span></div>
+          <div class="cd-banner-name" id="cd-name">Loading…</div>
+          <div class="cd-banner-meta"><span class="msr">event</span><span id="cd-meta"></span></div>
+        </div>
+        <div class="cd-body">
+          <div class="cd-tiles">
+            <div class="cd-tile"><div class="cd-num" id="cd-d">--</div><div class="cd-unit">Days</div></div>
+            <div class="cd-tile"><div class="cd-num" id="cd-h">--</div><div class="cd-unit">Hours</div></div>
+            <div class="cd-tile"><div class="cd-num" id="cd-m">--</div><div class="cd-unit">Mins</div></div>
+            <div class="cd-tile"><div class="cd-num" id="cd-s">--</div><div class="cd-unit">Secs</div></div>
+          </div>
+          <div class="cd-progress-row">
+            <div class="cd-track"><div class="cd-fill" id="cd-bar" style="width:0%"></div></div>
+            <div class="cd-pct" id="cd-pct">0%</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec-head"><div class="sec-head-title">Resources</div></div>
+      <div class="quick-grid">
+        <div class="qg-card" onclick="navTo('qbank')"><div class="qg-icon" style="background:var(--md-primary-dim);"><span class="msr s28 w300" style="color:var(--md-primary);">quiz</span></div><div class="qg-label">Question Bank</div></div>
+        <div class="qg-card" onclick="navTo('pyq')"><div class="qg-icon" style="background:#FCE8E6;"><span class="msr s28 w300" style="color:#EA4335;">history_edu</span></div><div class="qg-label">PYQ Papers</div></div>
+        <div class="qg-card" onclick="navTo('syllabus')"><div class="qg-icon" style="background:#E6F4EA;"><span class="msr s28 w300" style="color:#34A853;">checklist</span></div><div class="qg-label">Syllabus</div></div>
+        <div class="qg-card" onclick="navTo('pattern')"><div class="qg-icon" style="background:#FEF7E0;"><span class="msr s28 w300" style="color:#B06000;">bar_chart</span></div><div class="qg-label">Paper Pattern</div></div>
+        <div class="qg-card" onclick="navTo('notes')"><div class="qg-icon" style="background:#F3E8FD;"><span class="msr s28 w300" style="color:#A142F4;">sticky_note_2</span></div><div class="qg-label">Notes</div></div>
+        <div class="qg-card" onclick="navTo('tt')"><div class="qg-icon" style="background:var(--md-primary-dim);"><span class="msr s28 w300" style="color:var(--md-primary);">calendar_month</span></div><div class="qg-label">Timetable</div></div>
+      </div>
+
+      <div class="sec-head">
+        <div class="sec-head-title">All Exams</div>
+        <div class="sec-head-action" onclick="navTo('tt')">Timetable<span class="msr">arrow_forward</span></div>
+      </div>
+      <div class="exam-list" id="home-exams"></div>
+      <div class="pb16"></div>
+    </div>
+
+    <!-- ─── SEARCH ─── -->
+    <div class="view" id="view-search">
+      <div class="search-header">
+        <div class="icon-btn" onclick="history.back()"><span class="msr">arrow_back</span></div>
+        <input type="text" id="search-input" placeholder="Search papers, topics, notes..." autocomplete="off">
+      </div>
+      <div style="height:12px;"></div>
+      <div class="list-section" id="search-results">
+        <div class="empty-state">Type to search across everything.</div>
+      </div>
+    </div>
+
+    <!-- ─── TIMETABLE ─── -->
+    <div class="view" id="view-tt">
+      <div class="view-strip" style="background:var(--md-primary);color:#fff;">
+        <div class="vs-top-row">
+          <div>
+            <div class="vs-eyebrow">Exam Schedule</div>
+            <div class="vs-title" id="tt-title">Loading...</div>
+          </div>
+          <div class="icon-btn" onclick="history.back()" style="margin:-8px -8px 0 0;"><span class="msr">close</span></div>
+        </div>
+        <div class="vs-sub">Track your upcoming dates</div>
+      </div>
+      <div class="tt-list" id="tt-cards"></div>
+    </div>
+
+    <!-- ─── QUESTION BANK ─── -->
+    <div class="view" id="view-qbank">
+      <div class="view-strip" style="background:var(--md-primary);color:#fff;">
+        <div class="vs-top-row">
+          <div><div class="vs-eyebrow">Study Tool</div><div class="vs-title">Question Bank</div></div>
+          <div class="icon-btn" onclick="history.back()" style="margin:-8px -8px 0 0;"><span class="msr">close</span></div>
+        </div>
+        <div class="vs-sub">Important questions per paper</div>
+      </div>
+      <div class="sub-tabs" id="qbank-tabs"></div><div style="height:8px;"></div>
+      <div class="notes-wrap" id="qbank-list"></div><div class="pb16"></div>
+    </div>
+
+    <!-- ─── PYQ ─── -->
+    <div class="view" id="view-pyq">
+      <div class="view-strip" style="background:#EA4335;color:#fff;">
+        <div class="vs-top-row">
+          <div><div class="vs-eyebrow">Practice</div><div class="vs-title">Past Papers</div></div>
+          <div class="icon-btn" onclick="history.back()" style="margin:-8px -8px 0 0;"><span class="msr">close</span></div>
+        </div>
+        <div class="vs-sub">Real exam papers from past years</div>
+      </div>
+      <div class="year-scroller" id="pyq-years"></div>
+      <div class="list-section" id="pyq-list"></div>
+    </div>
+
+    <!-- ─── SYLLABUS ─── -->
+    <div class="view" id="view-syllabus">
+      <div class="view-strip" style="background:#34A853;color:#fff;">
+        <div class="vs-top-row">
+          <div><div class="vs-eyebrow">Reference</div><div class="vs-title">Syllabus</div></div>
+          <div class="icon-btn" onclick="history.back()" style="margin:-8px -8px 0 0;"><span class="msr">close</span></div>
+        </div>
+        <div class="vs-sub">Unit-wise topics for all papers</div>
+      </div>
+      <div class="sub-tabs" id="syl-tabs"></div><div style="height:8px;"></div>
+      <div class="g-accordion" id="syl-acc"></div><div class="pb16"></div>
+    </div>
+
+    <!-- ─── PATTERN ─── -->
+    <div class="view" id="view-pattern">
+      <div class="view-strip" style="background:#F9AB00;color:#202124;">
+        <div class="vs-top-row">
+          <div><div class="vs-eyebrow" style="color:#5F6368;">Reference</div><div class="vs-title">Paper Pattern</div></div>
+          <div class="icon-btn" onclick="history.back()" style="margin:-8px -8px 0 0;"><span class="msr">close</span></div>
+        </div>
+        <div class="vs-sub" style="opacity:.7;">Marks scheme & exam structure</div>
+      </div>
+      <div style="height:12px;"></div>
+      <div class="list-section" id="pattern-list"></div><div class="pb16"></div>
+    </div>
+
+    <!-- ─── NOTES ─── -->
+    <div class="view" id="view-notes">
+      <div class="view-strip" style="background:#A142F4;color:#fff;">
+        <div class="vs-top-row">
+          <div><div class="vs-eyebrow">Study Material</div><div class="vs-title">Notes</div></div>
+          <div class="icon-btn" onclick="history.back()" style="margin:-8px -8px 0 0;"><span class="msr">close</span></div>
+        </div>
+        <div class="vs-sub">Chapter-wise revision material</div>
+      </div>
+      <div class="sub-tabs" id="notes-tabs"></div><div style="height:8px;"></div>
+      <div class="notes-wrap" id="notes-list"></div><div class="pb16"></div>
+    </div>
+
+  </div><!-- /body -->
+
+  <!-- Verified-only gate: shown over a blurred copy of the app until the
+       student's ID is verified (see applyGate() in the script below). -->
+  <div id="gate" role="dialog" aria-modal="true" aria-labelledby="gate-title">
+    <div class="gate-card">
+      <div class="gate-badge"><span class="msr" id="gate-icon">lock</span></div>
+      <div class="gate-eyebrow">Verified students only</div>
+      <div class="gate-title" id="gate-title">Verify to unlock</div>
+      <div class="gate-sub" id="gate-sub">Confirm your student ID to open the BAFs App.</div>
+      <div class="gate-perks"><span>Question Bank</span><span>PYQ Papers</span><span>Notes</span><span>Paper Pattern</span></div>
+      <button class="gate-btn" id="gate-btn" type="button"><span class="msr" id="gate-btn-icon">verified_user</span><span id="gate-btn-text">Verify now</span></button>
+      <div class="gate-foot" id="gate-foot">Takes a minute · just your college ID</div>
+    </div>
+  </div>
+</div>
+<div id="snackbar"></div>
+
+<script>
+/* ═══════════════════════════════════════
+   SUPABASE INITIALIZATION & STATE
+═══════════════════════════════════════ */
+const supabaseUrl = 'https://bhapahazfsxtozpuftvm.supabase.co';
+const supabaseKey = 'sb_publishable_hQXxIGqbJGE_8OXYzymg6g_IRbbtWal';
+const supabaseClient = window.supabase.createClient(supabaseUrl, supabaseKey);
+
+let EXAMS = [], QBANK = [], NOTES = [], SYLLABUS = [], PYQS = [], PYQ_YEARS = [];
+let qbankTab = '', sylTab = '', notesTab = '', pyqYear = '';
+
+/* ═══════════════════════════════════════
+   UTILS
+═══════════════════════════════════════ */
+const $  = s => document.querySelector(s); const $$ = s => [...document.querySelectorAll(s)];
+const pad = n => String(n).padStart(2,'0');
+
+function parseTime(timeStr) {
+  const match = timeStr.match(/(\d+):(\d+)\s*(a\.m\.|p\.m\.|am|pm)/i);
+  if(!match) return '00:00:00';
+  let h = parseInt(match[1]), m = match[2], p = match[3].toLowerCase();
+  if(p.includes('p') && h < 12) h += 12;
+  if(p.includes('a') && h === 12) h = 0;
+  return String(h).padStart(2, '0') + ':' + m + ':00';
+}
+
+const isDone = e => new Date() > e.dt;
+const getNext = () => EXAMS.find(e => !isDone(e)) || EXAMS[EXAMS.length - 1];
+
+function getDisplayDate(dateStr) {
+  const d = new Date(dateStr);
+  return { dayNum: d.getDate(), monthStr: d.toLocaleString('en-US', { month: 'short' }), full: d.toLocaleString('en-US', { day: 'numeric', month: 'long', year: 'numeric' }) };
+}
+
+function addRipple(el, color = 'rgba(0,0,0,.07)') {
+  el.style.position = 'relative'; el.style.overflow = 'hidden';
+  el.addEventListener('pointerdown', ev => {
+    const rect = el.getBoundingClientRect(), size = Math.max(rect.width, rect.height) * 2.2;
+    const r = Object.assign(document.createElement('span'), { style: `position:absolute;border-radius:50%;pointer-events:none;width:${size}px;height:${size}px;left:${ev.clientX - rect.left - size/2}px;top:${ev.clientY - rect.top - size/2}px;background:${color};transform:scale(0);animation:ripple .5s ease-out forwards` });
+    el.append(r); setTimeout(() => r.remove(), 600);
+  });
+}
+
+let _sb;
+function toast(msg, icon = 'info') {
+  const el = $('#snackbar');
+  el.innerHTML = `<span class="msr s18" style="color:#8AB4F8;">${icon}</span>${msg}`;
+  el.classList.add('show');
+  clearTimeout(_sb); _sb = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+// Delegates to the shared full-screen viewer (pdf-viewer.js) — locked down,
+// no download/export, never navigates the WebView to the PDF URL itself.
+function openPdf(url, title) {
+  if (!isUnlocked()) { applyGate(); return; }
+  if (!url) { toast('PDF link not available', 'error'); return; }
+  window.openPdfViewer(url, title);
+}
+
+/* ═══════════════════════════════════════
+   VERIFIED-ONLY GATE
+   Status comes from the parent app (same-origin iframe). Falls back to the
+   profile cache main.js keeps in localStorage. Anything other than
+   'verified' is locked. NOTE: this is a UI gate — see README/CHANGES.
+═══════════════════════════════════════ */
+function getVerifStatus() {
+  try {
+    if (window.parent && window.parent !== window && typeof window.parent.getVerificationStatus === 'function') {
+      const st = window.parent.getVerificationStatus();
+      if (st !== undefined) return st;
+    }
+  } catch (e) { /* cross-origin / not embedded */ }
+  try {
+    const c = JSON.parse(localStorage.getItem('ecampus_profile_cache') || 'null');
+    return c ? c.verification_status : null;
+  } catch (e) { return null; }
+}
+const isUnlocked = () => getVerifStatus() === 'verified';
+
+const GATE_COPY = {
+  pending:  { icon: 'hourglass_top', title: 'Verification in review', sub: 'Your ID is with our team. The BAFs App unlocks the moment you are approved.', btn: 'View status', btnIcon: 'schedule', foot: 'You will be unlocked automatically' },
+  rejected: { icon: 'lock', title: 'Verification needs attention', sub: 'We could not verify your ID. Re-submit your details to unlock the BAFs App.', btn: 'Re-verify now', btnIcon: 'verified_user', foot: 'Takes a minute · just your college ID' },
+  none:     { icon: 'lock', title: 'Verify to unlock', sub: 'The BAFs App is for verified students. Confirm your student ID to get full access.', btn: 'Verify now', btnIcon: 'verified_user', foot: 'Takes a minute · just your college ID' },
+};
+let _gateShown = null;
+
+function applyGate() {
+  const app = $('#app'), st = getVerifStatus();
+  if (st === 'verified') {
+    if (_gateShown !== false) {
+      const wasLocked = app.classList.contains('locked');
+      app.classList.remove('locked');
+      if (wasLocked) { app.classList.add('unlocking'); setTimeout(() => app.classList.remove('unlocking'), 400); }
+      _gateShown = false;
+    }
+    return;
+  }
+  const c = GATE_COPY[st === 'pending' ? 'pending' : st === 'rejected' ? 'rejected' : 'none'];
+  $('#gate-icon').textContent = c.icon;
+  $('#gate-title').textContent = c.title;
+  $('#gate-sub').textContent = c.sub;
+  $('#gate-btn-text').textContent = c.btn;
+  $('#gate-btn-icon').textContent = c.btnIcon;
+  $('#gate-foot').textContent = c.foot;
+  app.classList.add('locked');
+  _gateShown = true;
+}
+
+// Opens the same full-screen verification view the app's banner opens.
+function openVerification() {
+  try {
+    const v = window.parent.document.getElementById('view-verification');
+    if (v) { v.classList.replace('hidden', 'flex'); return; }
+  } catch (e) { /* not embedded */ }
+  toast('Open your profile to verify your ID', 'lock');
+}
+$('#gate-btn').addEventListener('click', openVerification);
+
+// Keep the gate in step with the parent (approval, re-submission, theme…)
+window.addEventListener('storage', (e) => { if (e.key === 'ecampus_profile_cache') applyGate(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden) applyGate(); });
+setInterval(() => { if (_gateShown !== false) applyGate(); }, 2500);
+applyGate();
+
+/* ═══════════════════════════════════════
+   PAPER PATTERN IMAGES  (source: page_services_rows.csv, "Paper Pattern for SEM V")
+   Opened inside the app via the parent's openServiceLink(open_in_app = true).
+   Matched to exams by paper name (or short name) — edit PP_ALIASES if a name differs.
+═══════════════════════════════════════ */
+const PP_IMAGES = {
+  "Financial Accounting - V": "https://i.ibb.co/Fky8nL0K/image.png",
+  "Corporate Financial Reporting - I": "https://i.ibb.co/YTjx578q/image.png",
+  "IKS": "https://i.ibb.co/vCRsQNCP/image.png",
+  "SRS": "https://i.ibb.co/fVCMggHb/image.png",
+  "Direct and Indirect Tax – I": "https://i.ibb.co/d03xsw7G/image.png",
+  "FMM": "https://i.ibb.co/YTjx578q/image.png"
+};
+const PP_ALIASES = {
+  // 'exam short_name or paper (any case)': 'title exactly as in PP_IMAGES'
+};
+const ppKey = t => String(t || '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
+
+function findPatternUrl(exam) {
+  const alias = Object.keys(PP_ALIASES).find(k => ppKey(k) === ppKey(exam.short_name) || ppKey(k) === ppKey(exam.paper));
+  if (alias && PP_IMAGES[PP_ALIASES[alias]]) return PP_IMAGES[PP_ALIASES[alias]];
+  const paper = ppKey(exam.paper), short = ppKey(exam.short_name);
+  const titles = Object.keys(PP_IMAGES);
+  const hit =
+    titles.find(t => ppKey(t) === paper) ||                                   // exact paper name
+    (short && titles.find(t => ppKey(t) === short)) ||                        // short name, e.g. FMM
+    titles.find(t => paper && (ppKey(t).includes(paper) || paper.includes(ppKey(t))));
+  return hit ? PP_IMAGES[hit] : null;
+}
+
+function openPattern(exam) {
+  if (!isUnlocked()) { applyGate(); return; }
+  const url = findPatternUrl(exam);
+  if (!url) { toast('Paper pattern not uploaded yet', 'info'); return; }
+  const title = exam.paper + ' – Paper Pattern';
+  try {
+    if (window.parent && window.parent !== window && typeof window.parent.openServiceLink === 'function') {
+      window.parent.openServiceLink(url, true, title, { plain: true });
+      return;
+    }
+  } catch (e) { /* fall through */ }
+  window.open(url, '_blank');
+}
+
+/* ═══════════════════════════════════════
+   HISTORY-AWARE NAVIGATION
+═══════════════════════════════════════ */
+let currentView = 'home';
+history.replaceState({ view: 'home' }, '', '#home');
+
+function navTo(view, pushState = true) {
+  $$('.view').forEach(v => v.classList.remove('active'));
+  const el = $(`#view-${view}`);
+  if (el) { el.classList.add('active'); $('#body').scrollTop = 0; }
+  if(view === 'search') setTimeout(() => $('#search-input').focus(), 100);   if (pushState && currentView !== view) history.pushState({ view: view }, '', '#' + view);   currentView = view; }  window.addEventListener('popstate', (e) => {   if (e.state && e.state.view) navTo(e.state.view, false);   else navTo('home', false); });
+
+// Exposed for the parent page's own hardware/browser back-button handler —
+// this app is embedded via <iframe>, which has its own independent session
+// history, so the parent's back handling can't see or affect it without
+// these. Same-origin iframe, so the parent can call these directly
+// (iframe.contentWindow.bafsGoBack(), etc.) with no postMessage needed.
+window.bafsIsAtHome = function() { return currentView === 'home'; };
+window.bafsGoBack = function() { history.back(); }; // triggers the popstate listener above, same as a real back-press would
+
+function chipClick(el, view) {   $$('#home-chips .md-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  if (view !== 'home') navTo(view);
+}
+
+/* ═══════════════════════════════════════
+   COUNTDOWN
+═══════════════════════════════════════ */
+function tickCD() {
+  if(!EXAMS.length) return;
+  const next = getNext(), now = new Date(), diff = next.dt - now;
+  $('#cd-name').textContent = next.paper;
+  $('#cd-meta').textContent = `${next.exam_day}, ${getDisplayDate(next.exam_date).full}  ·  ${next.start_time} – ${next.end_time}`;
+  
+  if (diff <= 0) {
+    ['cd-d','cd-h','cd-m','cd-s'].forEach(id => $('#'+id).textContent = '00');
+  } else {
+    $('#cd-d').textContent = pad(Math.floor(diff / 86400000));
+    $('#cd-h').textContent = pad(Math.floor((diff % 86400000) / 3600000));
+    $('#cd-m').textContent = pad(Math.floor((diff % 3600000)  / 60000));
+    $('#cd-s').textContent = pad(Math.floor((diff % 60000)    / 1000));
+  }
+  
+  // PROGRESS BAR: Based on completed exams vs total exams
+  const totalExams = EXAMS.length;
+  const completedExams = EXAMS.filter(e => isDone(e)).length;
+  const pct = totalExams > 0 ? (completedExams / totalExams) * 100 : 0;
+  
+  $('#cd-bar').style.width = pct.toFixed(1) + '%';
+  $('#cd-pct').textContent = Math.round(pct) + '%';
+}
+setInterval(tickCD, 1000);
+
+// "Add to home screen" button on the countdown card — asks the native app
+// (see AndroidWidgetPin.requestPin() in MainActivity.java) to prompt the
+// launcher to place the live exam-countdown widget, same numbers as the
+// tiles above. Bridge only exists inside the Android app build, so anywhere
+// else this just points people to open the app there instead.
+function addCountdownWidget() {
+  if (window.AndroidWidgetPin && window.AndroidWidgetPin.requestPin) {
+    try { window.AndroidWidgetPin.requestPin(); } catch (e) { /* older app build without the bridge */ }
+  } else {
+    alert('Home screen widgets are available in the ECampus Android app.');
+  }
+}
+/* ═══════════════════════════════════════
+   SHIMMER PRE-RENDER FUNCTION
+═══════════════════════════════════════ */
+function showShimmers() {
+  const noteShimmer = `<div class="note-card" style="box-shadow:none; border:1px solid var(--md-outline);"><div class="note-icon shimmer-bg"></div><div class="note-body"><div class="shimmer-bg" style="height:14px; width:70%; border-radius:4px; margin-bottom:6px;"></div><div class="shimmer-bg" style="height:12px; width:40%; border-radius:4px;"></div></div></div>`.repeat(4);
+  const listShimmer = `<div class="g-item" style="box-shadow:none; border:1px solid var(--md-outline);"><div class="gi-lead shimmer-bg" style="border-radius:var(--radius-md);"></div><div class="gi-body"><div class="shimmer-bg" style="height:14px; width:70%; border-radius:4px; margin-bottom:6px;"></div><div class="shimmer-bg" style="height:12px; width:40%; border-radius:4px;"></div></div></div>`.repeat(4);
+  const examShimmer = `<div class="exam-card" style="box-shadow:none; border:1px solid var(--md-outline);"><div class="ec-date shimmer-bg"></div><div class="ec-info"><div class="shimmer-bg" style="height:14px; width:80%; border-radius:4px; margin-bottom:6px;"></div><div class="shimmer-bg" style="height:12px; width:50%; border-radius:4px;"></div></div></div>`.repeat(3);
+  const tabShimmer = `<div style="display:flex; gap:8px; padding:14px 16px;"><div class="shimmer-bg" style="height:20px; width:60px; border-radius:4px;"></div><div class="shimmer-bg" style="height:20px; width:60px; border-radius:4px;"></div><div class="shimmer-bg" style="height:20px; width:60px; border-radius:4px;"></div></div>`;
+
+  $('#cd-name').innerHTML = '<div class="shimmer-bg-dark" style="height:20px; width:60%; border-radius:4px; margin:2px 0;"></div>';
+  $('#cd-meta').innerHTML = '<div class="shimmer-bg-dark" style="height:14px; width:40%; border-radius:4px;"></div>';
+  $('#home-exams').innerHTML = examShimmer;
+  $('#tt-cards').innerHTML = examShimmer;
+  $('#qbank-tabs').innerHTML = tabShimmer;
+  $('#qbank-list').innerHTML = noteShimmer;
+  $('#pyq-list').innerHTML = listShimmer;
+  $('#pattern-list').innerHTML = listShimmer;
+  $('#syl-tabs').innerHTML = tabShimmer;
+  $('#syl-acc').innerHTML = listShimmer;
+  $('#notes-tabs').innerHTML = tabShimmer;
+  $('#notes-list').innerHTML = noteShimmer;
+}
+
+/* ═══════════════════════════════════════
+   RENDER UI
+═══════════════════════════════════════ */
+function renderHomeExams() {
+  const wrap = $('#home-exams'); wrap.innerHTML = '';
+  const next = getNext();
+  EXAMS.forEach(e => {
+    const done = isDone(e), isNext = e.id === next.id && !done;
+    const dObj = getDisplayDate(e.exam_date);
+    const card = document.createElement('div');
+    card.className = 'exam-card' + (done ? ' done' : '');
+    card.innerHTML = `<div class="ec-date" style="background:${done?'#F1F3F4':e.dim};"><div class="ec-day" style="color:${done?'#9AA0A6':e.color};">${dObj.dayNum}</div><div class="ec-month" style="color:${done?'#9AA0A6':e.color};">${dObj.monthStr}</div></div><div class="ec-info"><div class="ec-paper">${e.paper}</div><div class="ec-sub">${e.exam_day} · ${e.start_time} – ${e.end_time}</div></div><div class="ec-right"><div class="ec-cred" style="background:${done?'#F1F3F4':e.dim};color:${done?'#9AA0A6':e.color};">${done ? 'Done' : e.credits+' Cr'}</div>${isNext ? `<div class="pulse-dot pulse" style="background:${e.color};"></div>` : ''}</div>`;
+    card.onclick = () => navTo('tt');
+    addRipple(card); wrap.appendChild(card);
+  });
+}
+
+function renderTT() {
+  const wrap = $('#tt-cards'); wrap.innerHTML = '';
+  const next = getNext();
+  if (EXAMS.length > 0) $('#tt-title').textContent = `${EXAMS.length} Papers Schedule`;
+
+  EXAMS.forEach(e => {
+    const done = isDone(e), isNext = e.id === next.id && !done;
+    const dObj = getDisplayDate(e.exam_date);
+    let badgeTxt = done ? 'Completed' : (isNext ? 'Next Up' : 'Upcoming');
+    let badgeStyle = done ? 'background:#F1F3F4;color:#9AA0A6;' : (isNext ? `background:${e.color};color:#fff;` : `background:${e.dim};color:${e.txt};`);
+    
+    const card = document.createElement('div'); card.className = 'tt-card';
+    card.innerHTML = `<div class="tt-inner"><div class="tt-bar" style="background:${done?'#DADCE0':e.color};"></div><div class="tt-body"><div class="tt-top"><div class="tt-paper" style="opacity:${done?.6:1};">${e.paper}</div><div class="tt-badge ${isNext?'pulse':''}" style="${badgeStyle}">${badgeTxt}</div></div><div class="tt-chips"><div class="tt-chip" style="background:${done?'#F1F3F4':e.dim};color:${done?'#9AA0A6':e.txt};"><span class="msr">event</span>${e.exam_day}, ${dObj.full}</div><div class="tt-chip" style="background:#FEF7E0;color:#B06000;"><span class="msr">schedule</span>${e.start_time} – ${e.end_time}</div><div class="tt-chip" style="background:${done?'#F1F3F4':'#E6F4EA'};color:${done?'#9AA0A6':'#137333'};"><span class="msr">school</span>${e.credits} Credits</div></div></div></div>`;
+    addRipple(card); wrap.appendChild(card);
+  });
+}
+
+function buildSubTabs(containerId, activeKey, cb) {
+  const wrap = $('#' + containerId); wrap.innerHTML = '';
+  EXAMS.forEach(e => {
+    const t = document.createElement('div');
+    t.className = 'sub-tab' + (e.short_name === activeKey ? ' active' : '');
+    t.textContent = e.short_name;
+    t.onclick = () => cb(e.short_name);
+    addRipple(t, 'rgba(26,115,232,.1)'); wrap.appendChild(t);
+  });
+}
+
+function renderQbank() {
+  buildSubTabs('qbank-tabs', qbankTab, k => { qbankTab = k; renderQbank(); });
+  const wrap = $('#qbank-list'); wrap.innerHTML = '';
+  const qData = QBANK.filter(q => q.exam_short_name === qbankTab);
+  if(!qData.length) { wrap.innerHTML = '<div class="empty-state">No questions available yet.</div>'; return; }
+  
+  qData.forEach(q => {
+    const card = document.createElement('div'); card.className = 'note-card';
+    card.innerHTML = `<div class="note-strip" style="background:${q.color};"></div><div class="note-icon" style="background:${q.dim};"><span class="msr fill-w5" style="color:${q.color};">${q.icon}</span></div><div class="note-body"><div class="note-title">${q.title}</div><div class="note-meta"><span>${q.pages} pages</span><span>·</span><span>${q.upd}</span><span class="note-pill" style="background:${q.dim};color:${q.color};">${q.tag}</span></div></div><div class="note-dl"><span class="msr" style="color:${q.color};">picture_as_pdf</span></div>`;
+    card.onclick = () => openPdf(q.pdf_url, q.title);
+    addRipple(card); wrap.appendChild(card);
+  });
+}
+
+function renderPYQ() {
+  const yw = $('#pyq-years'); yw.innerHTML = '';
+  PYQ_YEARS.forEach(y => {
+    const c = document.createElement('div');
+    c.className = 'y-chip' + (y === pyqYear ? ' active' : '');
+    c.innerHTML = `<span class="msr">history_edu</span>${y}`;
+    c.onclick = () => { pyqYear = y; renderPYQ(); };
+    yw.appendChild(c);
+  });
+  
+  const wrap = $('#pyq-list'); wrap.innerHTML = '';
+  const filtered = PYQS.filter(p => p.year_range === pyqYear);
+  if (!filtered.length) { wrap.innerHTML = `<div class="empty-state">No past papers available for ${pyqYear}.</div>`; return; }
+
+  filtered.forEach(p => {
+    const e = EXAMS.find(x => x.short_name === p.exam_short_name);
+    if (!e) return;
+    const item = document.createElement('div'); item.className = 'g-item';
+    item.innerHTML = `<div class="gi-lead" style="background:${e.dim};"><span class="msr" style="color:${e.color};">description</span></div><div class="gi-body"><div class="gi-title">${e.paper}</div><div class="gi-sub">${p.year_range}  ·  ${e.credits} Credits</div></div><div class="gi-trail"><span class="msr s20" style="color:${e.color};">picture_as_pdf</span></div>`;
+    item.onclick = () => openPdf(p.pdf_url, e.paper + ' (' + p.year_range + ')');
+    addRipple(item); wrap.appendChild(item);
+  });
+}
+
+function renderSyllabus() {
+  buildSubTabs('syl-tabs', sylTab, k => { sylTab = k; renderSyllabus(); });
+  const wrap = $('#syl-acc'); wrap.innerHTML = '';
+  const exam = EXAMS.find(e => e.short_name === sylTab);
+  const units = SYLLABUS.filter(s => s.exam_short_name === sylTab);
+  if(!units.length) { wrap.innerHTML = '<div class="empty-state">Syllabus pending.</div>'; return; }
+
+  units.forEach(unit => {
+    const item = document.createElement('div'); item.className = 'g-acc';
+    let topics = typeof unit.topics === 'string' ? JSON.parse(unit.topics) : unit.topics;
+    item.innerHTML = `<div class="g-acc-hd"><div class="g-acc-lead" style="background:${exam.dim};"><span class="msr" style="color:${exam.color};">menu_book</span></div><div class="g-acc-info"><div class="g-acc-title">${unit.title}</div><div class="g-acc-count">${topics.length} topics</div></div><div class="g-acc-chevron"><span class="msr">expand_more</span></div></div><div class="g-acc-body">${topics.map(t => `<div class="g-acc-topic"><div class="g-acc-bullet" style="background:${exam.color};"></div><span>${t}</span></div>`).join('')}</div>`;
+    item.querySelector('.g-acc-hd').onclick = () => item.classList.toggle('open');
+    addRipple(item.querySelector('.g-acc-hd'), 'rgba(26,115,232,.07)'); wrap.appendChild(item);
+  });
+}
+
+function renderPattern() {
+  const wrap = $('#pattern-list'); wrap.innerHTML = '';
+  if(!EXAMS.length) { wrap.innerHTML = '<div class="empty-state">Pattern details pending.</div>'; return; }
+  EXAMS.forEach(e => {
+    const has = !!findPatternUrl(e);
+    const item = document.createElement('div'); item.className = 'g-item';
+    item.innerHTML = `<div class="gi-lead" style="background:${e.dim};"><span class="msr" style="color:${e.color};">bar_chart</span></div><div class="gi-body"><div class="gi-title">${e.paper}</div><div class="gi-sub">${e.credits} Credits  ·  Paper Pattern</div></div><div class="gi-trail"><span class="msr s20" style="color:${e.color};">${has ? 'image' : 'chevron_right'}</span></div>`;
+    item.onclick = () => openPattern(e);
+    addRipple(item); wrap.appendChild(item);
+  });
+}
+
+function renderNotes() {
+  buildSubTabs('notes-tabs', notesTab, k => { notesTab = k; renderNotes(); });
+  const wrap = $('#notes-list'); wrap.innerHTML = '';
+  const nData = NOTES.filter(n => n.exam_short_name === notesTab);
+  if(!nData.length) { wrap.innerHTML = '<div class="empty-state">No notes available yet.</div>'; return; }
+  
+  nData.forEach(n => {
+    const card = document.createElement('div'); card.className = 'note-card';
+    card.innerHTML = `<div class="note-strip" style="background:${n.color};"></div><div class="note-icon" style="background:${n.dim};"><span class="msr fill-w5" style="color:${n.color};">${n.icon}</span></div><div class="note-body"><div class="note-title">${n.title}</div><div class="note-meta"><span>${n.pages} pages</span><span>·</span><span>${n.upd}</span><span class="note-pill" style="background:${n.dim};color:${n.color};">${n.tag}</span></div></div><div class="note-dl"><span class="msr" style="color:${n.color};">picture_as_pdf</span></div>`;
+    card.onclick = () => openPdf(n.pdf_url, n.title);
+    addRipple(card); wrap.appendChild(card);
+  });
+}
+
+/* ═══════════════════════════════════════
+   GLOBAL SEARCH ENGINE
+═══════════════════════════════════════ */
+$('#search-input').addEventListener('input', (e) => {
+  const query = e.target.value.toLowerCase().trim();
+  const wrap = $('#search-results');
+  if(!query) { wrap.innerHTML = '<div class="empty-state">Type to search across everything.</div>'; return; }
+  
+  let results = [];
+
+  EXAMS.forEach(ex => {
+    if(ex.paper.toLowerCase().includes(query) || ex.short_name.toLowerCase().includes(query))
+      results.push({ type: 'Exam', title: ex.paper, sub: ex.short_name + ' · Schedule', icon: 'school', color: ex.color, dim: ex.dim, action: () => { navTo('tt'); }});
+  });
+
+  NOTES.forEach(n => {
+    if(n.title.toLowerCase().includes(query) || n.tag.toLowerCase().includes(query))
+      results.push({ type: 'Note', title: n.title, sub: n.exam_short_name + ' · ' + n.tag, icon: n.icon, color: n.color, dim: n.dim, action: () => { openPdf(n.pdf_url, n.title); }});
+  });
+
+  QBANK.forEach(q => {
+    if(q.title.toLowerCase().includes(query) || q.tag.toLowerCase().includes(query))
+      results.push({ type: 'QBank', title: q.title, sub: q.exam_short_name + ' · ' + q.tag, icon: q.icon, color: q.color, dim: q.dim, action: () => { openPdf(q.pdf_url, q.title); }});
+  });
+
+  PYQS.forEach(p => {
+    const ex = EXAMS.find(x => x.short_name === p.exam_short_name);
+    if(ex && (ex.paper.toLowerCase().includes(query) || p.year_range.includes(query)))
+      results.push({ type: 'PYQ', title: ex.paper + ' (' + p.year_range + ')', sub: 'Previous Year Paper', icon: 'history_edu', color: '#EA4335', dim: '#FCE8E6', action: () => { openPdf(p.pdf_url, ex.paper + ' (' + p.year_range + ')'); }});
+  });
+
+  SYLLABUS.forEach(s => {
+    let tArr = typeof s.topics === 'string' ? JSON.parse(s.topics) : s.topics;
+    let matchedTopics = tArr.filter(t => t.toLowerCase().includes(query));
+    if (matchedTopics.length > 0 || s.title.toLowerCase().includes(query)) {
+      results.push({ type: 'Syllabus', title: s.title, sub: s.exam_short_name + ' · Unit Match', icon: 'menu_book', color: '#34A853', dim: '#E6F4EA', action: () => { sylTab = s.exam_short_name; navTo('syllabus'); }});
+    }
+  });
+
+  if(!results.length) { wrap.innerHTML = '<div class="empty-state">No results found for "'+query+'"</div>'; return; }
+
+  wrap.innerHTML = '';
+  results.slice(0, 15).forEach(r => {
+    const item = document.createElement('div'); item.className = 'g-item';
+    item.innerHTML = `<div class="gi-lead" style="background:${r.dim};"><span class="msr" style="color:${r.color};">${r.icon}</span></div><div class="gi-body"><div class="gi-title">${r.title}</div><div class="gi-sub">${r.type} · ${r.sub}</div></div><div class="gi-trail"><span class="msr s20" style="color:var(--md-on-surface-var);">chevron_right</span></div>`;
+    item.onclick = r.action;
+    addRipple(item); wrap.appendChild(item);
+  });
+});
+
+/* ═══════════════════════════════════════
+   DATA FETCHING (INIT APP)
+═══════════════════════════════════════ */
+async function initApp() {
+  showShimmers();
+
+  try {
+    const [examsRes, qbankRes, notesRes, sylRes, pyqRes, pyqYearsRes] = await Promise.all([
+      supabaseClient.from('exams').select('*').eq('is_active', true).order('exam_date', { ascending: true }),
+      supabaseClient.from('qbank').select('*').eq('is_active', true),
+      supabaseClient.from('notes').select('*').eq('is_active', true),
+      supabaseClient.from('syllabus').select('*').eq('is_active', true).order('unit_order', { ascending: true }),
+      supabaseClient.from('pyqs').select('*').eq('is_active', true),
+      supabaseClient.from('pyq_years').select('*').eq('is_active', true).order('year_range', { ascending: false })
+    ]);
+
+    EXAMS = (examsRes.data || []).map(e => ({ ...e, dt: new Date(e.exam_date + 'T' + parseTime(e.start_time)) }));
+    QBANK = qbankRes.data || [];
+    NOTES = notesRes.data || [];
+    SYLLABUS = sylRes.data || [];
+    PYQS = pyqRes.data || [];
+    PYQ_YEARS = (pyqYearsRes.data || []).map(y => y.year_range);
+
+    if (EXAMS.length > 0) { qbankTab = EXAMS[0].short_name; sylTab = EXAMS[0].short_name; notesTab = EXAMS[0].short_name; }
+    if (PYQ_YEARS.length > 0) pyqYear = PYQ_YEARS[0];
+
+    renderHomeExams();
+    renderTT();
+    renderQbank();
+    renderPYQ();
+    renderSyllabus();
+    renderPattern();
+    renderNotes();
+    tickCD(); 
+    
+    $$('.qg-card').forEach(el => addRipple(el, 'rgba(0,0,0,.06)'));
+
+  } catch (err) {
+    console.error("Supabase fetch error:", err);
+    toast('Failed to sync data. Please refresh.', 'error');
+  }
+}
+
+initApp();
+</script>
+</body>
+</html>

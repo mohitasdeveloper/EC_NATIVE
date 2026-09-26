@@ -1,0 +1,1387 @@
+name: ECampus Web-Only Android Build
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Android Packages
+    runs-on: ubuntu-latest
+
+    # 🚀 FIX: the keystore/key passwords used to be hardcoded in plaintext
+    # right here. That's a real exposure if this repo is or ever becomes
+    # visible to anyone else — anyone with read access to the repo (or its
+    # history) could sign a release build with your key. They now come
+    # from GitHub Secrets instead (Settings → Secrets and variables →
+    # Actions in this repo). You need to add three secrets before this
+    # workflow will run: KEYSTORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD
+    # (KEYSTORE_BASE64 and GOOGLE_SERVICES_JSON were already secrets).
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install Dependencies & Plugins
+        run: |
+          npm install
+          # 🚀 FIX: www/ now ships the real, bundled ECampus web app
+          # (previously overwritten here with a one-line placeholder,
+          # because the app relied on server.url to fetch everything
+          # live — see the comment in capacitor.config.ts). This step
+          # compiles the real Tailwind build (tailwind.config.js +
+          # www/tailwind-src.css → www/tailwind.css) that index.html,
+          # auth/login.html and auth/signup.html link to, replacing the
+          # cdn.tailwindcss.com runtime compiler.
+          npm run build
+          npx cap add android
+
+      - name: Download Logo & Generate Assets
+        run: |
+          npm install -g @capacitor/assets
+          mkdir -p assets
+          curl -L "https://i.ibb.co/SwZ0jG2F/EC.png" -o assets/icon.png
+          curl -L "https://i.ibb.co/SwZ0jG2F/EC.png" -o assets/splash.png
+          npx @capacitor/assets generate --android
+
+      - name: Write Complete AndroidManifest.xml
+        run: |
+          MANIFEST_PATH="android/app/src/main/AndroidManifest.xml"
+          cat << 'EOF' > $MANIFEST_PATH
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+              <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+              <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+              <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+              <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+              <!-- Exam countdown home-screen widget (BAFS Study Planner) needs to
+                   re-render right after a reboot, since its scheduled tick
+                   chain (see ExamWidgetProvider's scheduleNextTick()) doesn't
+                   resume the instant the device comes back up on its own —
+                   see ExamWidgetProvider's onReceive(). -->
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+              <uses-feature android:name="android.hardware.camera" android:required="false" />
+
+              <application
+                  android:allowBackup="true"
+                  android:icon="@mipmap/ic_launcher"
+                  android:label="@string/app_name"
+                  android:roundIcon="@mipmap/ic_launcher_round"
+                  android:supportsRtl="true"
+                  android:theme="@style/AppTheme"
+                  android:usesCleartextTraffic="false"
+                  android:networkSecurityConfig="@xml/network_security_config">
+
+                  <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="default" />
+                  <meta-data android:name="android.webkit.WebView.EnableSafeBrowsing" android:value="true" />
+
+                  <activity
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+                      android:name=".MainActivity"
+                      android:label="@string/title_activity_main"
+                      android:theme="@style/AppTheme.NoActionBarLaunch"
+                      android:launchMode="singleTask"
+                      android:exported="true">
+
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+
+                      <intent-filter>
+                          <action android:name="FCM_PLUGIN_ACTIVITY" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                      </intent-filter>
+
+                      <intent-filter android:autoVerify="true">
+                          <action android:name="android.intent.action.VIEW" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                          <category android:name="android.intent.category.BROWSABLE" />
+                          <data android:scheme="https" android:host="ecampus-android.mohitmali.in" android:pathPrefix="/" />
+                      </intent-filter>
+                  </activity>
+
+                  <provider
+                      android:name="androidx.core.content.FileProvider"
+                      android:authorities="${applicationId}.fileprovider"
+                      android:exported="false"
+                      android:grantUriPermissions="true">
+                      <meta-data
+                          android:name="android.support.FILE_PROVIDER_PATHS"
+                          android:resource="@xml/file_paths"></meta-data>
+                  </provider>
+
+                  <!-- Exam countdown home-screen widget — see ExamWidgetProvider.java.
+                       exported="false": only the system (AppWidgetManager / the
+                       BOOT_COMPLETED broadcast) is meant to invoke this, never
+                       another app. -->
+                  <receiver
+                      android:name=".ExamWidgetProvider"
+                      android:exported="false">
+                      <intent-filter>
+                          <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.appwidget.provider"
+                          android:resource="@xml/exam_widget_info" />
+                  </receiver>
+              </application>
+          </manifest>
+          EOF
+
+      - name: Inject WebView Configurations
+        run: |
+          JAVA_PATH="android/app/src/main/java/com/mohit/ecampus/MainActivity.java"
+          cat << 'EOF' > $JAVA_PATH
+          package com.mohit.ecampus;
+
+          import android.app.DownloadManager;
+          import android.content.ActivityNotFoundException;
+          import android.content.ContentValues;
+          import android.appwidget.AppWidgetManager;
+          import android.content.ComponentName;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.media.MediaScannerConnection;
+          import android.net.Uri;
+          import android.os.Build;
+          import android.os.Environment;
+          import android.provider.MediaStore;
+          import android.util.Base64;
+          import android.util.Log;
+          import android.view.WindowManager;
+          import android.webkit.CookieManager;
+          import android.webkit.DownloadListener;
+          import android.webkit.JavascriptInterface;
+          import android.webkit.RenderProcessGoneDetail;
+          import android.webkit.URLUtil;
+          import android.webkit.WebResourceError;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebSettings;
+          import android.webkit.WebView;
+          import android.widget.Toast;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.OutputStream;
+          import com.getcapacitor.BridgeActivity;
+          import com.getcapacitor.BridgeWebViewClient;
+
+          public class MainActivity extends BridgeActivity {
+              // Guards against re-installing the WebViewClient every time
+              // onStart() re-runs (e.g. returning from the Recents screen).
+              private boolean webViewClientConfigured = false;
+
+              @Override
+              public void onStart() {
+                  super.onStart();
+                  WebView webView = getBridge().getWebView();
+                  WebSettings settings = webView.getSettings();
+                  settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+                  CookieManager.getInstance().setAcceptThirdPartyCookies(webView, true);
+                  webView.setOverScrollMode(WebView.OVER_SCROLL_NEVER); 
+
+                  // 🚀 FIX: graceful native-side failure handling.
+                  //
+                  // Previously there was no custom WebViewClient at all, so
+                  // two real failure modes had no recovery path:
+                  //   1. A failed main-frame load (e.g. a corrupted/partial
+                  //      install, or — before this fix — the old server.url
+                  //      setup trying to reach the internet on a fresh,
+                  //      offline install) just showed Chromium's bare error
+                  //      page instead of anything the user could act on.
+                  //   2. If the WebView's render process died (Android can
+                  //      kill it under memory pressure — plausible here given
+                  //      how much JS/canvas/image work this app does), the
+                  //      whole app would simply crash, since nothing told
+                  //      Android the app was handling it.
+                  // We extend Capacitor's own BridgeWebViewClient (not a bare
+                  // WebViewClient) so the bridge's normal local-asset serving
+                  // and plugin JS injection keep working unchanged.
+                  if (!webViewClientConfigured) {
+                      webViewClientConfigured = true;
+                      webView.setWebViewClient(new BridgeWebViewClient(getBridge()) {
+                          @Override
+                          public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                              super.onReceivedError(view, request, error);
+                              if (request != null && request.isForMainFrame()) {
+                                  Log.w("ECampus", "Main-frame load failed: " + error.getDescription());
+                                  view.loadUrl("file:///android_asset/public/offline.html");
+                              }
+                          }
+
+                          @Override
+                          public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                              Log.e("ECampus", "WebView render process gone (crashed=" + detail.didCrash() + "). Restarting activity instead of letting the app die.");
+                              runOnUiThread(() -> {
+                                  Toast.makeText(getApplicationContext(), "Restarting ECampus…", Toast.LENGTH_SHORT).show();
+                                  recreate();
+                              });
+                              // Returning true tells Android we've handled it — otherwise
+                              // the whole app process gets killed, which is the "random
+                              // crash" behavior this is fixing.
+                              return true;
+                          }
+                      });
+                  }
+
+                  // 🚀 Native Scoped Storage & Gallery MediaStore Saver
+                  webView.addJavascriptInterface(new Object() {
+                      @JavascriptInterface
+                      public void saveBase64File(String base64Data, String fileName) {
+                          try {
+                              String mimeType = "application/octet-stream";
+                              if (base64Data.startsWith("data:")) {
+                                  int colonIndex = base64Data.indexOf(':');
+                                  int semicolonIndex = base64Data.indexOf(';');
+                                  if (colonIndex != -1 && semicolonIndex != -1) {
+                                      mimeType = base64Data.substring(colonIndex + 1, semicolonIndex);
+                                  }
+                              } else {
+                                  if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) mimeType = "image/jpeg";
+                                  else if (fileName.endsWith(".png")) mimeType = "image/png";
+                                  else if (fileName.endsWith(".webp")) mimeType = "image/webp";
+                                  else if (fileName.endsWith(".mp4")) mimeType = "video/mp4";
+                              }
+
+                              String cleanBase64 = base64Data.replaceFirst("^data:[^;]*;base64,?", "");
+                              byte[] fileBytes = Base64.decode(cleanBase64, Base64.DEFAULT);
+
+                              boolean isImage = fileName.endsWith(".jpg") || fileName.endsWith(".jpeg") || fileName.endsWith(".png") || fileName.endsWith(".webp") || mimeType.startsWith("image/");
+                              boolean isVideo = fileName.endsWith(".mp4") || fileName.endsWith(".webm") || mimeType.startsWith("video/");
+
+                              // Android 10+ (API 29 - 36) Scoped Storage MediaStore Writer
+                              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                  ContentValues values = new ContentValues();
+                                  values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+                                  values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
+                                  values.put(MediaStore.MediaColumns.IS_PENDING, 1);
+
+                                  Uri collection;
+                                  if (isImage) {
+                                      values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/ECampus");
+                                      collection = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+                                  } else if (isVideo) {
+                                      values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/ECampus");
+                                      collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+                                  } else {
+                                      values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/ECampus");
+                                      collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+                                  }
+
+                                  Uri itemUri = getContentResolver().insert(collection, values);
+                                  if (itemUri != null) {
+                                      OutputStream os = getContentResolver().openOutputStream(itemUri);
+                                      if (os != null) {
+                                          os.write(fileBytes);
+                                          os.close();
+                                      }
+                                      values.clear();
+                                      values.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                                      getContentResolver().update(itemUri, values, null, null);
+
+                                      String destination = isImage || isVideo ? "Gallery" : "Downloads";
+                                      runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Saved to " + destination + "!", Toast.LENGTH_SHORT).show());
+                                  }
+                              } else {
+                                  // Android 9 and older fallback
+                                  File dir;
+                                  if (isImage) {
+                                      dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
+                                  } else if (isVideo) {
+                                      dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES);
+                                  } else {
+                                      dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                                  }
+                                  if (!dir.exists()) dir.mkdirs();
+                                  File file = new File(dir, fileName);
+                                  FileOutputStream os = new FileOutputStream(file);
+                                  os.write(fileBytes);
+                                  os.close();
+
+                                  MediaScannerConnection.scanFile(getApplicationContext(), new String[]{file.getAbsolutePath()}, new String[]{mimeType}, null);
+                                  String destination = isImage || isVideo ? "Gallery" : "Downloads";
+                                  runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Saved to " + destination + "!", Toast.LENGTH_SHORT).show());
+                              }
+                          } catch (Exception e) {
+                              e.printStackTrace();
+                              runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Save failed: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+                          }
+                      }
+                  }, "AndroidDownloader");
+
+                  // 🔗 Explicit "open this outside the app" bridge — always a real
+                  // ACTION_VIEW intent to the system/chooser, regardless of the
+                  // URL's domain. The web layer's link router (openServiceLink /
+                  // openChatLink) calls this whenever the *developer* has
+                  // explicitly marked a link as "external" — decoupled from
+                  // Capacitor's allowNavigation domain whitelist, which was
+                  // never meant to be a per-link content decision.
+                  webView.addJavascriptInterface(new Object() {
+                      @JavascriptInterface
+                      public void openExternal(String url) {
+                          try {
+                              Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                              intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                              startActivity(intent);
+                          } catch (ActivityNotFoundException e) {
+                              runOnUiThread(() -> Toast.makeText(getApplicationContext(), "No app found to open this link", Toast.LENGTH_SHORT).show());
+                          } catch (Exception e) {
+                              e.printStackTrace();
+                          }
+                      }
+                  }, "AndroidLinkHandler");
+
+                  // 🔒 Screenshot / screen-recording block for protected documents.
+                  // FLAG_SECURE is a whole-window flag — there's no way to secure
+                  // just a region of the screen — so this blanks the ENTIRE app
+                  // (including the Recent Apps thumbnail) while it's on, not just
+                  // the PDF viewer. The shared web-layer viewer (pdf-viewer.js)
+                  // calls enable() right before it shows a document and disable()
+                  // when it closes, so the rest of the app is unaffected once the
+                  // viewer is dismissed.
+                  webView.addJavascriptInterface(new Object() {
+                      @JavascriptInterface
+                      public void enable() {
+                          runOnUiThread(() -> getWindow().setFlags(
+                              WindowManager.LayoutParams.FLAG_SECURE,
+                              WindowManager.LayoutParams.FLAG_SECURE
+                          ));
+                      }
+                      @JavascriptInterface
+                      public void disable() {
+                          runOnUiThread(() -> getWindow().clearFlags(WindowManager.LayoutParams.FLAG_SECURE));
+                      }
+                  }, "AndroidSecure");
+
+                  // 🎨 Exam-countdown widget theme sync — pushes the app's
+                  // *chosen* theme (light/dark, set via setupThemeToggle() in
+                  // main.js — not the OS setting) into the same
+                  // SharedPreferences ExamWidgetProvider reads, so the
+                  // home-screen widget matches instead of always looking
+                  // like a light card dropped onto a dark launcher (or the
+                  // reverse). Re-renders every placed widget immediately so
+                  // the switch feels instant rather than waiting for the
+                  // next 30-min refresh cycle.
+                  webView.addJavascriptInterface(new Object() {
+                      @JavascriptInterface
+                      public void setTheme(String theme) {
+                          Context appContext = getApplicationContext();
+                          appContext.getSharedPreferences(ExamWidgetUpdateWorker.PREFS, Context.MODE_PRIVATE)
+                              .edit()
+                              .putBoolean("is_dark", "dark".equals(theme))
+                              .apply();
+                          ExamWidgetProvider.updateAllWidgets(appContext);
+                      }
+                  }, "AndroidWidgetTheme");
+
+                  // 📌 "Add to home screen" button (see bafs-study-planner.html's
+                  // countdown card) — Android 8+ can prompt the launcher to
+                  // place the widget directly instead of the user having to
+                  // find it themselves in the long-press widget picker.
+                  webView.addJavascriptInterface(new Object() {
+                      @JavascriptInterface
+                      public void requestPin() {
+                          runOnUiThread(() -> {
+                              AppWidgetManager mgr = (AppWidgetManager) getSystemService(Context.APPWIDGET_SERVICE);
+                              ComponentName provider = new ComponentName(MainActivity.this, ExamWidgetProvider.class);
+                              // 🚀 FIX: requestPinAppWidget() *returns a boolean* saying
+                              // whether it actually managed to hand the request to the
+                              // launcher — the previous code never checked it, so on a
+                              // launcher that reports isRequestPinAppWidgetSupported()
+                              // == true but then declines the actual request (common on
+                              // several OEM launchers), nothing happened: no toast, no
+                              // widget, no error. That silent failure is exactly what
+                              // "preview not showing, not getting added" looks like.
+                              boolean requested = false;
+                              if (mgr != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && mgr.isRequestPinAppWidgetSupported()) {
+                                  try {
+                                      requested = mgr.requestPinAppWidget(provider, null, null);
+                                  } catch (Exception e) {
+                                      Log.w("ECampus", "requestPinAppWidget threw", e);
+                                  }
+                              }
+                              if (!requested) {
+                                  Toast.makeText(getApplicationContext(), "Your launcher doesn't support quick-add - long-press your home screen, Widgets, ECampus to add it", Toast.LENGTH_LONG).show();
+                              }
+                          });
+                      }
+                  }, "AndroidWidgetPin");
+
+                  // Intercept WebView Standard HTTP Downloads
+                  webView.setDownloadListener(new DownloadListener() {
+                      @Override
+                      public void onDownloadStart(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
+                          try {
+                              String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
+
+                              // Defense-in-depth: the web app now renders PDFs itself
+                              // (fetch + pdf.js canvas) and never navigates the WebView
+                              // to a PDF URL directly, so this shouldn't normally fire
+                              // for PDFs anymore. If something still lands here (e.g. a
+                              // future link this bridge doesn't know about yet), prefer
+                              // a visible external viewer over a silent background
+                              // DownloadManager fetch.
+                              boolean isPdf = (mimeType != null && mimeType.contains("pdf")) || url.toLowerCase().contains(".pdf");
+                              if (isPdf && !url.startsWith("blob:") && !url.startsWith("data:")) {
+                                  try {
+                                      Intent intent = new Intent(Intent.ACTION_VIEW);
+                                      intent.setDataAndType(Uri.parse(url), "application/pdf");
+                                      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                      startActivity(intent);
+                                      return;
+                                  } catch (ActivityNotFoundException e) {
+                                      // no PDF-capable app installed — fall through to the normal download path below
+                                  }
+                              }
+
+                              if (url.startsWith("blob:") || url.startsWith("data:")) {
+                                  String js = "javascript: var xhr = new XMLHttpRequest();" +
+                                              "xhr.open('GET', '" + url + "', true);" +
+                                              "xhr.responseType = 'blob';" +
+                                              "xhr.onload = function() {" +
+                                              "    if (this.status === 200) {" +
+                                              "        var reader = new FileReader();" +
+                                              "        reader.readAsDataURL(this.response);" +
+                                              "        reader.onloadend = function() {" +
+                                              "            AndroidDownloader.saveBase64File(reader.result, '" + fileName + "');" +
+                                              "        }" +
+                                              "    }" +
+                                              "};" +
+                                              "xhr.send();";
+                                  webView.evaluateJavascript(js, null);
+                              } else {
+                                  DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+                                  request.setMimeType(mimeType);
+                                  String cookies = CookieManager.getInstance().getCookie(url);
+                                  request.addRequestHeader("cookie", cookies);
+                                  request.addRequestHeader("User-Agent", userAgent);
+                                  request.setDescription("Downloading file...");
+                                  request.setTitle(fileName);
+                                  request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                                  request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+                                  
+                                  DownloadManager dm = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+                                  if (dm != null) {
+                                      dm.enqueue(request);
+                                      Toast.makeText(getApplicationContext(), "Downloading...", Toast.LENGTH_SHORT).show();
+                                  }
+                              }
+                          } catch (Exception e) {
+                              Toast.makeText(getApplicationContext(), "Download Error", Toast.LENGTH_SHORT).show();
+                          }
+                      }
+                  });
+              }
+          }
+          EOF
+
+      - name: Add BAFS Exam Countdown Widget
+        # Home-screen widget: live countdown to the next exam from the BAFS
+        # Study Planner's exam table (see www/bafs-study-planner.html and
+        # ARCHITECTURE.md's "BAFS exam widget" note). Deliberately scoped to
+        # that one temporary, course-specific mini-app's data — not a
+        # general "my exams" feature — so delete this step, and the source
+        # files it writes, alongside bafs-study-planner.html once exam
+        # season is over.
+        run: |
+          mkdir -p android/app/src/main/java/com/mohit/ecampus
+          mkdir -p android/app/src/main/res/layout
+          mkdir -p android/app/src/main/res/xml
+          mkdir -p android/app/src/main/res/values
+          mkdir -p android/app/src/main/res/drawable
+
+          cat << 'EOF' > android/app/src/main/java/com/mohit/ecampus/ExamWidgetProvider.java
+          package com.mohit.ecampus;
+
+          import android.app.PendingIntent;
+          import android.appwidget.AppWidgetManager;
+          import android.appwidget.AppWidgetProvider;
+          import android.content.ComponentName;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.content.res.Configuration;
+          import android.graphics.Color;
+          import android.os.Build;
+          import android.view.View;
+          import android.widget.RemoteViews;
+          import androidx.work.ExistingWorkPolicy;
+          import androidx.work.OneTimeWorkRequest;
+          import androidx.work.WorkManager;
+          import java.util.Locale;
+          import java.util.concurrent.TimeUnit;
+
+          // Renders the exam-countdown widget from whatever's cached in
+          // SharedPreferences (instant, no network wait) and kicks off a
+          // background refresh via ExamWidgetUpdateWorker. Never talks to
+          // Supabase directly itself — that's all in the Worker, so this
+          // class stays fast enough to run on the main thread, which
+          // onUpdate/onReceive here always do.
+          //
+          // Countdown display: 4 plain boxes (Days / Hours / Mins / Secs), no
+          // Chronometer. An earlier version of this file used a Chronometer
+          // for live per-second ticking, which turned out to be the wrong
+          // tradeoff twice over: (1) RemoteViews Chronometer text is always
+          // at least "M:SS", never a bare 2-digit number, so a dedicated
+          // Secs box always had a stray leading unit in it; and (2) in
+          // *count-down* mode, the instant a scheduled redraw is late (Doze/
+          // battery optimization deferring the WorkManager job — which does
+          // happen on some devices, at both per-minute AND per-hour
+          // granularity), the Chronometer keeps ticking past its target on
+          // its own and starts showing a "-" — actively wrong, not just
+          // stale. Four plain TextViews can't do that: if a scheduled
+          // redraw is late, they just sit on the last-known-correct numbers
+          // (stale, not wrong) until the next one lands — either
+          // scheduleNextTick() below, or the ordinary 30-min OS-guaranteed
+          // refresh as a backstop either way. If ticks are visibly landing
+          // late on a given device, that's Android's battery-optimization
+          // policy throttling background wakeups for this app — exempting
+          // the app from battery optimization (per-device wording, usually
+          // Settings → Apps → this app → Battery → "Unrestricted"/"No
+          // restrictions") is the real fix for that, not something app code
+          // can force from the inside.
+          public class ExamWidgetProvider extends AppWidgetProvider {
+              private static final String WORK_NAME = "exam_widget_refresh";
+              private static final String TICK_WORK_NAME = "exam_widget_tick";
+              private static final long ONE_DAY_MILLIS = 24L * 60 * 60 * 1000;
+
+              @Override
+              public void onUpdate(Context context, AppWidgetManager appWidgetManager, int[] appWidgetIds) {
+                  for (int id : appWidgetIds) {
+                      updateAppWidget(context, appWidgetManager, id);
+                  }
+                  enqueueRefresh(context);
+              }
+
+              @Override
+              public void onReceive(Context context, Intent intent) {
+                  super.onReceive(context, intent);
+                  // AppWidgetProvider only auto-dispatches APPWIDGET_* actions to
+                  // onUpdate/onDeleted/etc. BOOT_COMPLETED isn't one of those, so
+                  // it has to be handled here explicitly — the scheduleNextTick()
+                  // chain doesn't survive a reboot on its own the instant the
+                  // device comes back up, so this kicks it off again alongside
+                  // an immediate redraw.
+                  if (Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) {
+                      AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+                      int[] ids = mgr.getAppWidgetIds(new ComponentName(context, ExamWidgetProvider.class));
+                      if (ids.length > 0) {
+                          onUpdate(context, mgr, ids);
+                      }
+                  }
+              }
+
+              private static void enqueueRefresh(Context context) {
+                  OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(ExamWidgetUpdateWorker.class).build();
+                  // REPLACE, not APPEND/KEEP — several widget instances calling
+                  // onUpdate around the same time (e.g. right after boot) should
+                  // collapse into a single fetch, not queue up N redundant ones.
+                  WorkManager.getInstance(context).enqueueUniqueWork(WORK_NAME, ExistingWorkPolicy.REPLACE, request);
+              }
+
+              // Every redraw (from here, from the 30-min periodic refresh, or
+              // from boot) reschedules the next one for ~60s later — a single
+              // unified tick instead of separate day/hour/minute rollovers,
+              // since with no Chronometer left there's no "it'll count itself
+              // down accurately in between" fallback for Mins/Secs anymore;
+              // they only look fresh because this keeps landing every
+              // minute. Each firing recomputes days/hours/mins/secs from
+              // System.currentTimeMillis() fresh (see updateAppWidget()), so
+              // even a late tick self-corrects to the right numbers the
+              // moment it does run — it just means the *previous* numbers
+              // sat on screen a bit longer than a minute, never that they
+              // were wrong.
+              private static void scheduleNextTick(Context context) {
+                  OneTimeWorkRequest request = new OneTimeWorkRequest.Builder(ExamWidgetRedrawWorker.class)
+                          .setInitialDelay(60, TimeUnit.SECONDS)
+                          .build();
+                  WorkManager.getInstance(context).enqueueUniqueWork(TICK_WORK_NAME, ExistingWorkPolicy.REPLACE, request);
+              }
+
+              // Called by ExamWidgetUpdateWorker once a fetch completes, so every
+              // placed widget instance picks up the new data immediately instead
+              // of waiting for its own next onUpdate. Also called by
+              // ExamWidgetRedrawWorker for the network-free per-minute tick.
+              static void updateAllWidgets(Context context) {
+                  AppWidgetManager mgr = AppWidgetManager.getInstance(context);
+                  int[] ids = mgr.getAppWidgetIds(new ComponentName(context, ExamWidgetProvider.class));
+                  for (int id : ids) updateAppWidget(context, mgr, id);
+              }
+
+              // Colors mirror the app's own --md-primary / --md-surface tokens
+              // (see :root and :root.dark in www/bafs-study-planner.html) so the
+              // widget reads as the same brand, not a different-looking bolt-on.
+              private static void applyTheme(RemoteViews views, boolean isDark) {
+                  int bgRes = isDark ? R.drawable.exam_widget_background_dark : R.drawable.exam_widget_background;
+                  int tileBgRes = isDark ? R.drawable.exam_tile_background_dark : R.drawable.exam_tile_background;
+                  int brandColor = isDark ? Color.parseColor("#9AA0A6") : Color.parseColor("#5F6368");
+                  int titleColor = isDark ? Color.parseColor("#E8EAED") : Color.parseColor("#202124");
+                  int accent = isDark ? Color.parseColor("#FF4081") : Color.parseColor("#D81B60");
+                  int accentText = isDark ? Color.parseColor("#FF80AB") : Color.parseColor("#C2185B");
+
+                  views.setInt(R.id.exam_widget_root, "setBackgroundResource", bgRes);
+                  views.setInt(R.id.exam_tile_days, "setBackgroundResource", tileBgRes);
+                  views.setInt(R.id.exam_tile_hours, "setBackgroundResource", tileBgRes);
+                  views.setInt(R.id.exam_tile_mins, "setBackgroundResource", tileBgRes);
+                  views.setInt(R.id.exam_tile_secs, "setBackgroundResource", tileBgRes);
+                  views.setTextColor(R.id.exam_widget_brand, brandColor);
+                  views.setTextColor(R.id.exam_title, titleColor);
+                  views.setTextColor(R.id.exam_meta, brandColor);
+                  views.setTextColor(R.id.exam_d, accent);
+                  views.setTextColor(R.id.exam_h, accent);
+                  views.setTextColor(R.id.exam_m, accent);
+                  views.setTextColor(R.id.exam_s, accent);
+                  views.setTextColor(R.id.exam_d_label, accentText);
+                  views.setTextColor(R.id.exam_h_label, accentText);
+                  views.setTextColor(R.id.exam_m_label, accentText);
+                  views.setTextColor(R.id.exam_s_label, accentText);
+              }
+
+              static void updateAppWidget(Context context, AppWidgetManager appWidgetManager, int appWidgetId) {
+                  RemoteViews views = new RemoteViews(context.getPackageName(), R.layout.exam_widget);
+                  SharedPreferences prefs = context.getSharedPreferences(ExamWidgetUpdateWorker.PREFS, Context.MODE_PRIVATE);
+
+                  // "is_dark" is pushed by the app's own theme toggle (see
+                  // AndroidWidgetTheme.setTheme() in MainActivity.java). Until
+                  // the app has been opened at least once, fall back to the
+                  // system's own dark-mode setting — the same fallback the web
+                  // app itself uses for a first run (prefers-color-scheme).
+                  boolean systemDark = (context.getResources().getConfiguration().uiMode
+                          & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
+                  boolean isDark = prefs.contains("is_dark") ? prefs.getBoolean("is_dark", false) : systemDark;
+                  applyTheme(views, isDark);
+
+                  boolean hasEverFetched = prefs.contains("has_exam");
+                  boolean hasExam = prefs.getBoolean("has_exam", false);
+                  boolean loadFailed = prefs.getBoolean("load_failed", false);
+
+                  views.setViewVisibility(R.id.exam_tiles, View.GONE);
+
+                  if (!hasEverFetched && !loadFailed) {
+                      views.setTextViewText(R.id.exam_title, "Loading next exam…");
+                      views.setTextViewText(R.id.exam_meta, "");
+                  } else if (!hasExam) {
+                      views.setTextViewText(R.id.exam_title, loadFailed ? "Couldn't load exam data" : "🎉 No upcoming exams");
+                      views.setTextViewText(R.id.exam_meta, loadFailed ? "Tap to open ECampus" : "You're all caught up");
+                  } else {
+                      String paper = prefs.getString("paper", "Exam");
+                      String meta = prefs.getString("meta", "");
+                      long targetMillis = prefs.getLong("target_millis", 0);
+                      long remaining = targetMillis - System.currentTimeMillis();
+
+                      views.setTextViewText(R.id.exam_title, paper);
+                      views.setTextViewText(R.id.exam_meta, meta);
+
+                      if (remaining <= 0) {
+                          views.setTextViewText(R.id.exam_meta, "Happening now");
+                          views.setTextViewText(R.id.exam_d, "00");
+                          views.setTextViewText(R.id.exam_h, "00");
+                          views.setTextViewText(R.id.exam_m, "00");
+                          views.setTextViewText(R.id.exam_s, "00");
+                          views.setViewVisibility(R.id.exam_tiles, View.VISIBLE);
+                      } else {
+                          long days = remaining / ONE_DAY_MILLIS;
+                          long dayRemainderMillis = remaining % ONE_DAY_MILLIS;
+                          long hours = dayRemainderMillis / 3600000;
+                          long hourRemainderMillis = dayRemainderMillis % 3600000;
+                          long minutes = hourRemainderMillis / 60000;
+                          long seconds = (hourRemainderMillis % 60000) / 1000;
+
+                          views.setTextViewText(R.id.exam_d, String.format(Locale.US, "%02d", days));
+                          views.setTextViewText(R.id.exam_h, String.format(Locale.US, "%02d", hours));
+                          views.setTextViewText(R.id.exam_m, String.format(Locale.US, "%02d", minutes));
+                          views.setTextViewText(R.id.exam_s, String.format(Locale.US, "%02d", seconds));
+                          views.setViewVisibility(R.id.exam_tiles, View.VISIBLE);
+                      }
+                      // Recomputed fresh from wall-clock time above regardless of
+                      // whether this draw was triggered by a tick, the ordinary
+                      // 30-min refresh, or a fresh data fetch — so scheduling the
+                      // next tick here (rather than only from one specific call
+                      // site) keeps the chain alive no matter which of those
+                      // triggered this particular redraw.
+                      scheduleNextTick(context);
+                  }
+
+                  Intent activityIntent = new Intent(context, MainActivity.class);
+                  activityIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                  int flags = PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+                  PendingIntent pendingIntent = PendingIntent.getActivity(context, 0, activityIntent, flags);
+                  views.setOnClickPendingIntent(R.id.exam_widget_root, pendingIntent);
+
+                  appWidgetManager.updateAppWidget(appWidgetId, views);
+              }
+          }
+          EOF
+
+          cat << 'EOF' > android/app/src/main/java/com/mohit/ecampus/ExamWidgetUpdateWorker.java
+          package com.mohit.ecampus;
+
+          import android.content.Context;
+          import android.content.SharedPreferences;
+          import android.util.Log;
+          import androidx.annotation.NonNull;
+          import androidx.work.Worker;
+          import androidx.work.WorkerParameters;
+          import java.io.BufferedReader;
+          import java.io.InputStreamReader;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.text.SimpleDateFormat;
+          import java.util.Date;
+          import java.util.Locale;
+          import java.util.regex.Matcher;
+          import java.util.regex.Pattern;
+          import org.json.JSONArray;
+          import org.json.JSONObject;
+
+          // Fetches the next upcoming exam from the BAFS Study Planner's exam
+          // table and caches it for ExamWidgetProvider to render. This is a
+          // *separate*, temporary Supabase project from the rest of ECampus —
+          // same public anon key already shipped in www/bafs-study-planner.html,
+          // not a new secret. Runs on a WorkManager background thread, never
+          // the main thread, since RemoteViews rendering (ExamWidgetProvider)
+          // must stay fast and can't block on network I/O.
+          public class ExamWidgetUpdateWorker extends Worker {
+              static final String PREFS = "exam_widget_prefs";
+              private static final String SUPABASE_URL = "https://bhapahazfsxtozpuftvm.supabase.co";
+              private static final String SUPABASE_ANON_KEY = "sb_publishable_hQXxIGqbJGE_8OXYzymg6g_IRbbtWal";
+
+              public ExamWidgetUpdateWorker(@NonNull Context context, @NonNull WorkerParameters params) {
+                  super(context, params);
+              }
+
+              @NonNull
+              @Override
+              public Result doWork() {
+                  Context context = getApplicationContext();
+                  try {
+                      URL url = new URL(SUPABASE_URL + "/rest/v1/exams?is_active=eq.true&order=exam_date.asc,start_time.asc&select=paper,exam_date,start_time,end_time,exam_day&limit=25");
+                      HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                      conn.setRequestMethod("GET");
+                      conn.setRequestProperty("apikey", SUPABASE_ANON_KEY);
+                      conn.setRequestProperty("Authorization", "Bearer " + SUPABASE_ANON_KEY);
+                      conn.setConnectTimeout(15000);
+                      conn.setReadTimeout(15000);
+
+                      int code = conn.getResponseCode();
+                      if (code != 200) {
+                          Log.w("ExamWidget", "Fetch failed, HTTP " + code);
+                          return onFetchFailed(context);
+                      }
+
+                      StringBuilder sb = new StringBuilder();
+                      BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                      String line;
+                      while ((line = reader.readLine()) != null) sb.append(line);
+                      reader.close();
+
+                      JSONArray exams = new JSONArray(sb.toString());
+                      long now = System.currentTimeMillis();
+                      JSONObject next = null;
+                      long nextMillis = 0;
+
+                      for (int i = 0; i < exams.length(); i++) {
+                          JSONObject e = exams.getJSONObject(i);
+                          long millis = examDateTimeMillis(e.optString("exam_date"), e.optString("start_time"));
+                          if (millis > now) {
+                              next = e;
+                              nextMillis = millis;
+                              break;
+                          }
+                      }
+
+                      SharedPreferences.Editor editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit();
+                      if (next != null) {
+                          String meta = next.optString("exam_day") + ", " + formatDate(next.optString("exam_date"))
+                                  + " · " + next.optString("start_time") + " – " + next.optString("end_time");
+                          editor.putString("paper", next.optString("paper"));
+                          editor.putString("meta", meta);
+                          editor.putLong("target_millis", nextMillis);
+                          editor.putBoolean("has_exam", true);
+                      } else {
+                          editor.putBoolean("has_exam", false);
+                      }
+                      editor.putBoolean("load_failed", false);
+                      editor.apply();
+
+                      ExamWidgetProvider.updateAllWidgets(context);
+                      return Result.success();
+                  } catch (Exception e) {
+                      Log.e("ExamWidget", "Refresh failed", e);
+                      return onFetchFailed(context);
+                  }
+              }
+
+              // A failed fetch should never blank out a countdown that's already
+              // showing — leave existing cached data alone and let it keep
+              // ticking with what we last knew, same as any other offline-first
+              // widget. Only the very first fetch (nothing cached yet) needs to
+              // tell the widget to stop showing "Loading…" and show an error
+              // state instead.
+              private Result onFetchFailed(Context context) {
+                  SharedPreferences prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+                  if (!prefs.contains("has_exam")) {
+                      prefs.edit().putBoolean("load_failed", true).apply();
+                      ExamWidgetProvider.updateAllWidgets(context);
+                  }
+                  return Result.retry();
+              }
+
+              private static long examDateTimeMillis(String dateStr, String timeStr) throws Exception {
+                  String time = normalizeTime(timeStr);
+                  SimpleDateFormat fmt = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US);
+                  Date d = fmt.parse(dateStr + "T" + time);
+                  return d != null ? d.getTime() : 0;
+              }
+
+              // Mirrors parseTime() in www/bafs-study-planner.html exactly, so the
+              // widget and the in-app countdown always agree on when an exam
+              // actually starts.
+              private static String normalizeTime(String raw) {
+                  if (raw == null) return "00:00:00";
+                  Matcher m = Pattern.compile("(\\d+):(\\d+)\\s*(a\\.m\\.|p\\.m\\.|am|pm)", Pattern.CASE_INSENSITIVE).matcher(raw);
+                  if (!m.find()) return "00:00:00";
+                  int h = Integer.parseInt(m.group(1));
+                  String min = m.group(2);
+                  String p = m.group(3).toLowerCase(Locale.US);
+                  if (p.contains("p") && h < 12) h += 12;
+                  if (p.contains("a") && h == 12) h = 0;
+                  return String.format(Locale.US, "%02d:%s:00", h, min);
+              }
+
+              private static String formatDate(String isoDate) {
+                  try {
+                      SimpleDateFormat in = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+                      SimpleDateFormat out = new SimpleDateFormat("d MMM", Locale.US);
+                      Date d = in.parse(isoDate);
+                      return d != null ? out.format(d) : isoDate;
+                  } catch (Exception e) {
+                      return isoDate;
+                  }
+              }
+          }
+          EOF
+
+          cat << 'EOF' > android/app/src/main/java/com/mohit/ecampus/ExamWidgetRedrawWorker.java
+          package com.mohit.ecampus;
+
+          import android.content.Context;
+          import androidx.annotation.NonNull;
+          import androidx.work.Worker;
+          import androidx.work.WorkerParameters;
+
+          // A pure redraw, no network — scheduled by ExamWidgetProvider's
+          // scheduleNextTick(), roughly once a minute, to keep the Days/
+          // Hours/Mins/Secs tiles reasonably fresh between the ordinary
+          // 30-min ExamWidgetUpdateWorker refreshes. Every firing calls
+          // updateAppWidget(), which recomputes all four numbers straight
+          // from wall-clock time and reschedules the next tick itself — so
+          // even a late-firing tick (e.g. deferred by battery optimization)
+          // self-corrects to the right numbers the moment it does run.
+          public class ExamWidgetRedrawWorker extends Worker {
+              public ExamWidgetRedrawWorker(@NonNull Context context, @NonNull WorkerParameters params) {
+                  super(context, params);
+              }
+
+              @NonNull
+              @Override
+              public Result doWork() {
+                  ExamWidgetProvider.updateAllWidgets(getApplicationContext());
+                  return Result.success();
+              }
+          }
+          EOF
+
+          cat << 'EOF' > android/app/src/main/res/layout/exam_widget.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <!-- Light-theme colors are the XML defaults (so a not-yet-updated
+               widget still looks right); ExamWidgetProvider.applyTheme()
+               overrides both background + text colors at render time when
+               the app's saved theme (or the system default, pre-first-launch)
+               is dark. Mirrors the Days/Hours/Min:Sec tile look of the
+               in-app countdown card — see .cd-tiles in
+               bafs-study-planner.html — as closely as a widget safely can
+               (Min and Sec share one box; see the class-doc comment in
+               ExamWidgetProvider.java for why).
+
+               🚀 FIX: the header block (brand/title/meta) is wrap_content
+               and pinned to the top, but the tiles row below it now sits in
+               its own layout_height="0dp" / layout_weight="1" wrapper with
+               gravity="center_vertical" — it claims all height the header
+               doesn't use and centers the tiles inside it, instead of the
+               old plain wrap_content row that left dead background space
+               below it whenever a launcher gave the widget more height than
+               the content needed (the visible "gap" issue). Padding/text
+               sizes are also trimmed a bit smaller so there's more room
+               before a shorter placement starts clipping content — a
+               launcher can still be told to shrink a widget below what it
+               needs to show everything (Android doesn't reflow/scale
+               RemoteViews content to fit, it just clips), so
+               android:minResizeHeight is set explicitly below to make that
+               less likely to happen in the first place. -->
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:id="@+id/exam_widget_root"
+              android:layout_width="match_parent"
+              android:layout_height="match_parent"
+              android:orientation="vertical"
+              android:background="@drawable/exam_widget_background"
+              android:padding="12dp">
+
+              <TextView
+                  android:id="@+id/exam_widget_brand"
+                  android:layout_width="wrap_content"
+                  android:layout_height="wrap_content"
+                  android:text="@string/exam_widget_brand"
+                  android:textSize="10sp"
+                  android:textColor="#5F6368"
+                  android:textAllCaps="true"
+                  android:layout_marginBottom="2dp" />
+
+              <TextView
+                  android:id="@+id/exam_title"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:textSize="15sp"
+                  android:textStyle="bold"
+                  android:textColor="#202124"
+                  android:maxLines="2"
+                  android:ellipsize="end" />
+
+              <TextView
+                  android:id="@+id/exam_meta"
+                  android:layout_width="match_parent"
+                  android:layout_height="wrap_content"
+                  android:textSize="11sp"
+                  android:textColor="#5F6368"
+                  android:layout_marginTop="1dp"
+                  android:maxLines="1"
+                  android:ellipsize="end" />
+
+              <LinearLayout
+                  android:layout_width="match_parent"
+                  android:layout_height="0dp"
+                  android:layout_weight="1"
+                  android:orientation="vertical"
+                  android:gravity="center_vertical">
+
+                  <LinearLayout
+                      android:id="@+id/exam_tiles"
+                      android:layout_width="match_parent"
+                      android:layout_height="wrap_content"
+                      android:orientation="horizontal"
+                      android:visibility="gone">
+
+                      <LinearLayout
+                          android:id="@+id/exam_tile_days"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:layout_marginEnd="6dp"
+                          android:orientation="vertical"
+                          android:gravity="center"
+                          android:padding="6dp"
+                          android:background="@drawable/exam_tile_background">
+
+                          <TextView
+                              android:id="@+id/exam_d"
+                              android:layout_width="wrap_content"
+                              android:layout_height="wrap_content"
+                              android:textSize="18sp"
+                              android:textStyle="bold"
+                              android:textColor="#D81B60" />
+
+                          <TextView
+                              android:id="@+id/exam_d_label"
+                              android:layout_width="wrap_content"
+                              android:layout_height="wrap_content"
+                              android:layout_marginTop="1dp"
+                              android:text="@string/exam_widget_days_label"
+                              android:textSize="8sp"
+                              android:textStyle="bold"
+                              android:textAllCaps="true"
+                              android:textColor="#C2185B" />
+                      </LinearLayout>
+
+                      <LinearLayout
+                          android:id="@+id/exam_tile_hours"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:layout_marginEnd="6dp"
+                          android:orientation="vertical"
+                          android:gravity="center"
+                          android:padding="6dp"
+                          android:background="@drawable/exam_tile_background">
+
+                          <TextView
+                              android:id="@+id/exam_h"
+                              android:layout_width="wrap_content"
+                              android:layout_height="wrap_content"
+                              android:textSize="18sp"
+                              android:textStyle="bold"
+                              android:textColor="#D81B60" />
+
+                          <TextView
+                              android:id="@+id/exam_h_label"
+                              android:layout_width="wrap_content"
+                              android:layout_height="wrap_content"
+                              android:layout_marginTop="1dp"
+                              android:text="@string/exam_widget_hours_label"
+                              android:textSize="8sp"
+                              android:textStyle="bold"
+                              android:textAllCaps="true"
+                              android:textColor="#C2185B" />
+                      </LinearLayout>
+
+                      <LinearLayout
+                          android:id="@+id/exam_tile_mins"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:layout_marginEnd="6dp"
+                          android:orientation="vertical"
+                          android:gravity="center"
+                          android:padding="6dp"
+                          android:background="@drawable/exam_tile_background">
+
+                          <TextView
+                              android:id="@+id/exam_m"
+                              android:layout_width="wrap_content"
+                              android:layout_height="wrap_content"
+                              android:textSize="18sp"
+                              android:textStyle="bold"
+                              android:textColor="#D81B60" />
+
+                          <TextView
+                              android:id="@+id/exam_m_label"
+                              android:layout_width="wrap_content"
+                              android:layout_height="wrap_content"
+                              android:layout_marginTop="1dp"
+                              android:text="@string/exam_widget_mins_label"
+                              android:textSize="8sp"
+                              android:textStyle="bold"
+                              android:textAllCaps="true"
+                              android:textColor="#C2185B" />
+                      </LinearLayout>
+
+                      <LinearLayout
+                          android:id="@+id/exam_tile_secs"
+                          android:layout_width="0dp"
+                          android:layout_height="wrap_content"
+                          android:layout_weight="1"
+                          android:orientation="vertical"
+                          android:gravity="center"
+                          android:padding="6dp"
+                          android:background="@drawable/exam_tile_background">
+
+                          <TextView
+                              android:id="@+id/exam_s"
+                              android:layout_width="wrap_content"
+                              android:layout_height="wrap_content"
+                              android:textSize="18sp"
+                              android:textStyle="bold"
+                              android:textColor="#D81B60" />
+
+                          <TextView
+                              android:id="@+id/exam_s_label"
+                              android:layout_width="wrap_content"
+                              android:layout_height="wrap_content"
+                              android:layout_marginTop="1dp"
+                              android:text="@string/exam_widget_secs_label"
+                              android:textSize="8sp"
+                              android:textStyle="bold"
+                              android:textAllCaps="true"
+                              android:textColor="#C2185B" />
+                      </LinearLayout>
+                  </LinearLayout>
+              </LinearLayout>
+
+          </LinearLayout>
+          EOF
+
+          cat << 'EOF' > android/app/src/main/res/drawable/exam_widget_background.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#FFFFFF" />
+              <corners android:radius="20dp" />
+          </shape>
+          EOF
+
+          cat << 'EOF' > android/app/src/main/res/drawable/exam_widget_background_dark.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <!-- Same surface color as the app's own dark-mode surface token
+               (see :root.dark in www/bafs-study-planner.html) for a
+               consistent brand seam. -->
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#1E1E1E" />
+              <corners android:radius="20dp" />
+          </shape>
+          EOF
+
+          cat << 'EOF' > android/app/src/main/res/drawable/exam_tile_background.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#FCE4EC" />
+              <corners android:radius="12dp" />
+          </shape>
+          EOF
+
+          cat << 'EOF' > android/app/src/main/res/drawable/exam_tile_background_dark.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="#3D1A2B" />
+              <corners android:radius="12dp" />
+          </shape>
+          EOF
+
+          # 🚀 FIX: requestPinAppWidget() confirmation sheet — many launchers
+          # (Samsung One UI, MIUI, etc.) render a thumbnail from
+          # android:previewImage in that sheet, and some silently refuse to
+          # show/complete the pin flow at all when it's missing, even though
+          # the *manual* long-press → Widgets picker doesn't need it (it
+          # renders the real initialLayout instead). ic_launcher already
+          # exists (generated by @capacitor/assets a few steps up), so it's
+          # a safe, always-present resource to point at.
+          cat << 'EOF' > android/app/src/main/res/xml/exam_widget_info.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+              android:minWidth="200dp"
+              android:minHeight="120dp"
+              android:minResizeWidth="200dp"
+              android:minResizeHeight="120dp"
+              android:updatePeriodMillis="1800000"
+              android:initialLayout="@layout/exam_widget"
+              android:previewImage="@mipmap/ic_launcher"
+              android:resizeMode="horizontal|vertical"
+              android:widgetCategory="home_screen"
+              android:description="@string/exam_widget_description" />
+          EOF
+
+          cat << 'EOF' > android/app/src/main/res/values/exam_widget_strings.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="exam_widget_brand">ECampus · BAFS</string>
+              <string name="exam_widget_description">Live countdown to your next BAFS exam</string>
+              <string name="exam_widget_days_label">Days</string>
+              <string name="exam_widget_hours_label">Hours</string>
+              <string name="exam_widget_mins_label">Mins</string>
+              <string name="exam_widget_secs_label">Secs</string>
+          </resources>
+          EOF
+
+      - name: Create Network Security Config File
+        run: |
+          mkdir -p android/app/src/main/res/xml
+          cat << 'EOF' > android/app/src/main/res/xml/network_security_config.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <network-security-config>
+              <base-config cleartextTrafficPermitted="false">
+                  <trust-anchors>
+                      <certificates src="system" />
+                  </trust-anchors>
+              </base-config>
+              <domain-config cleartextTrafficPermitted="false">
+                  <domain includeSubdomains="true">ecampus-android.mohitmali.in</domain>
+              </domain-config>
+          </network-security-config>
+          EOF
+
+      - name: Inject Firebase google-services.json Configuration
+        run: |
+          echo '${{ secrets.GOOGLE_SERVICES_JSON }}' > android/app/google-services.json
+
+      - name: Validate google-services.json
+        run: |
+          FILE="android/app/google-services.json"
+          if ! jq -e '.project_info' "$FILE" > /dev/null 2>&1; then
+            echo "::error::google-services.json is missing 'project_info' — the GOOGLE_SERVICES_JSON secret is empty, truncated, or contains the wrong content. Re-check it in repo Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - name: Sync Capacitor Changes & Inject Google Services Plugin
+        run: |
+          npx cap sync android
+          sed -i '/dependencies {/a \        classpath "com.google.gms:google-services:4.4.2"' android/build.gradle
+          echo "apply plugin: 'com.google.gms.google-services'" >> android/app/build.gradle
+
+      - name: Add WorkManager dependency for Exam Widget
+        # ExamWidgetUpdateWorker (added in "Add BAFS Exam Countdown Widget"
+        # above) extends androidx.work.Worker — this is the one library
+        # dependency it needs that the default Capacitor template doesn't
+        # already pull in. WorkManager ships its own consumer ProGuard
+        # rules bundled in the AAR, so no extra keep rules are needed for
+        # the library itself — only for our two classes (see the R8 step
+        # below).
+        run: |
+          sed -i '/dependencies {/a \    implementation "androidx.work:work-runtime:2.9.1"' android/app/build.gradle
+          grep -q "androidx.work:work-runtime" android/app/build.gradle || { echo "::error::Could not insert the WorkManager dependency — android/app/build.gradle's dependencies block may have changed shape."; exit 1; }
+
+      - name: Debug secret lengths (temporary — remove after)
+        run: |
+          echo "KEYSTORE_BASE64 length: $(printf '%s' "${{ secrets.KEYSTORE_BASE64 }}" | wc -c)  (expected 3652)"
+          echo "KEYSTORE_PASSWORD length: $(printf '%s' "${{ secrets.KEYSTORE_PASSWORD }}" | wc -c)  (expected 25)"
+          echo "KEY_ALIAS length: $(printf '%s' "${{ secrets.KEY_ALIAS }}" | wc -c)  (expected 11)"
+          echo "KEY_PASSWORD length: $(printf '%s' "${{ secrets.KEY_PASSWORD }}" | wc -c)  (expected 25)"
+      
+      - name: Decode Permanent Keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > android/app/release.keystore
+
+      - name: Validate keystore credentials
+        run: |
+          keytool -list -keystore android/app/release.keystore \
+            -storepass "${{ secrets.KEYSTORE_PASSWORD }}" \
+            -alias "${{ secrets.KEY_ALIAS }}" > /dev/null \
+            || { echo "::error::Keystore/alias/password mismatch — check KEYSTORE_BASE64, KEYSTORE_PASSWORD, and KEY_ALIAS secrets."; exit 1; }
+
+      - name: Setup Gradle Sign Environment Variables
+        run: |
+          echo "RELEASE_STORE_FILE=release.keystore" >> android/gradle.properties
+          echo "RELEASE_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}" >> android/gradle.properties
+          echo "RELEASE_KEY_ALIAS=${{ secrets.KEY_ALIAS }}" >> android/gradle.properties
+          echo "RELEASE_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}" >> android/gradle.properties
+
+      - name: Inject Signing Configuration & Automate Version Code
+        run: |
+          GRADLE_PATH="android/app/build.gradle"
+          APP_VARS_PATH="android/variables.gradle"
+          
+          if [ -f "$APP_VARS_PATH" ]; then
+            sed -i "s/targetSdkVersion = .*/targetSdkVersion = 36/g" $APP_VARS_PATH
+            sed -i "s/compileSdkVersion = .*/compileSdkVersion = 36/g" $APP_VARS_PATH
+          fi
+          sed -i "s/targetSdkVersion .*/targetSdkVersion 36/g" $GRADLE_PATH
+          sed -i "s/compileSdkVersion .*/compileSdkVersion 36/g" $GRADLE_PATH
+          
+          # versionCode must be higher than anything already on Play (2.0.3 = 87, 2.1 upload = 12).
+          # github.run_number restarted low, so add an offset: run 1 -> 101, run 12 -> 112, etc.
+          VERSION_CODE=$(( ${{ github.run_number }} + 100 ))
+          echo "Using versionCode $VERSION_CODE"
+          sed -i "s/versionCode 1/versionCode $VERSION_CODE/g" $GRADLE_PATH
+          sed -i "s/versionName \"1.0\"/versionName \"2.1\"/g" $GRADLE_PATH
+          
+          sed -i '/buildTypes {/i \    signingConfigs {\n        release {\n            storeFile file(RELEASE_STORE_FILE)\n            storePassword RELEASE_STORE_PASSWORD\n            keyAlias RELEASE_KEY_ALIAS\n            keyPassword RELEASE_KEY_PASSWORD\n        }\n    }' $GRADLE_PATH
+          sed -i '/minifyEnabled/i \            signingConfig signingConfigs.release' $GRADLE_PATH
+
+      - name: Enable R8 (minify + shrink) and write keep rules
+        run: |
+          GRADLE_PATH="android/app/build.gradle"
+
+          # Play Console "DEX code optimization" (Obfuscation 2%): the Capacitor
+          # template ships with minifyEnabled false, so nothing was ever
+          # shrunk/renamed. Turn on R8 for release + resource shrinking.
+          sed -i 's/minifyEnabled false/minifyEnabled true/' $GRADLE_PATH
+          sed -i '/minifyEnabled true/a \            shrinkResources true' $GRADLE_PATH
+          sed -i 's/proguard-android.txt/proguard-android-optimize.txt/' $GRADLE_PATH
+          grep -n "minifyEnabled\|shrinkResources\|proguardFiles" $GRADLE_PATH
+          grep -q "minifyEnabled true" $GRADLE_PATH || { echo "::error::Could not enable minifyEnabled — the Capacitor template's build.gradle changed; update this step."; exit 1; }
+
+          cat << 'EOF' > android/app/proguard-rules.pro
+          # ---- Readable crash traces in Play Console (mapping.txt is bundled in the .aab)
+          -keepattributes SourceFile,LineNumberTable,*Annotation*,Signature,InnerClasses,EnclosingMethod
+          -renamesourcefileattribute SourceFile
+
+          # ---- JavaScript bridges injected in MainActivity (AndroidDownloader,
+          # ---- AndroidLinkHandler, screenshot-block bridge). R8 must not strip or
+          # ---- rename @JavascriptInterface methods or the web layer calls nothing.
+          -keepclassmembers class * {
+              @android.webkit.JavascriptInterface <methods>;
+          }
+
+          # ---- Capacitor core + every plugin (loaded by class name via reflection)
+          -keep class com.getcapacitor.** { *; }
+          -keep class * extends com.getcapacitor.Plugin { *; }
+          -keep @com.getcapacitor.annotation.CapacitorPlugin class * { *; }
+          -keepclassmembers class * {
+              @com.getcapacitor.PluginMethod <methods>;
+              @com.getcapacitor.annotation.PermissionCallback <methods>;
+              @com.getcapacitor.annotation.ActivityCallback <methods>;
+          }
+          -dontwarn com.getcapacitor.**
+
+          # ---- @capgo/inappbrowser
+          -keep class ee.forgr.capacitor_inappbrowser.** { *; }
+          -dontwarn ee.forgr.capacitor_inappbrowser.**
+
+          # ---- MainActivity is referenced from the manifest
+          -keep class com.mohit.ecampus.MainActivity { *; }
+
+          # ---- Exam widget: ExamWidgetProvider is referenced from the manifest
+          # (by class name, like MainActivity), and both Worker classes are
+          # instantiated by WorkManager via reflection using their class name —
+          # R8 renaming/stripping any of them breaks the widget silently (no
+          # crash, it just never updates).
+          -keep class com.mohit.ecampus.ExamWidgetProvider { *; }
+          -keep class com.mohit.ecampus.ExamWidgetUpdateWorker { *; }
+          -keep class com.mohit.ecampus.ExamWidgetRedrawWorker { *; }
+          EOF
+
+          # shrinkResources removes drawables/mipmaps that are only looked up by
+          # NAME at runtime (splash screen "splash", notification icons, launcher
+          # icons) — keep them so the splash / push icons don't go missing.
+          # @layout/* is here for the same reason: exam_widget.xml is referenced
+          # from exam_widget_info.xml's android:initialLayout attribute (a
+          # resource-XML reference, not a code reference the shrinker can trace
+          # as reliably as an R.layout.* usage in Java).
+          mkdir -p android/app/src/main/res/raw
+          cat << 'EOF' > android/app/src/main/res/raw/keep.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources xmlns:tools="http://schemas.android.com/tools"
+              tools:shrinkMode="lenient"
+              tools:keep="@drawable/*,@mipmap/*,@raw/*,@color/*,@xml/*,@layout/*" />
+          EOF
+
+      - name: Make Gradle Executable
+        run: chmod +x ./android/gradlew
+
+      - name: Build Debug & Signed Release Packages
+        run: |
+          cd android
+          ./gradlew assembleDebug
+          ./gradlew assembleRelease
+          ./gradlew bundleRelease
+
+      - name: Upload Debug APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECampus-Debug-APK
+          path: android/app/build/outputs/apk/debug/*.apk
+
+      - name: Upload Signed Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECampus-Release-APK
+          path: android/app/build/outputs/apk/release/*.apk
+
+      - name: Upload Signed Release AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECampus-Release-AAB
+          path: android/app/build/outputs/bundle/release/*.aab
+
+      - name: Upload R8 mapping (keep for de-obfuscating crashes)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ECampus-R8-Mapping
+          path: android/app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: warn

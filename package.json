@@ -1,0 +1,36 @@
+{
+  "name": "com.mohit.ecampus",
+  "version": "2.1.0",
+  "description": "ECampus Android App (bundled, offline-first WebView)",
+  "scripts": {
+    "build:css": "tailwindcss -c tailwind.config.js -i ./www/tailwind-src.css -o ./www/tailwind.css --minify",
+    "vendor": "node scripts/vendor.js",
+    "build": "npm run build:css && npm run vendor"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/app": "^7.0.0",
+    "@capacitor/camera": "^7.0.0",
+    "@capacitor/cli": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/device": "^7.0.0",
+    "@capacitor/haptics": "^7.0.0",
+    "@capacitor/keyboard": "^7.0.0",
+    "@capacitor/network": "^7.0.0",
+    "@capacitor/push-notifications": "^7.0.0",
+    "@capacitor/share": "^7.0.0",
+    "@capacitor/splash-screen": "^7.0.0",
+    "@capgo/inappbrowser": "^7.9.0",
+    "@fortawesome/fontawesome-free": "6.5.1",
+    "@supabase/supabase-js": "^2.45.0",
+    "html2canvas": "1.4.1",
+    "quill": "1.3.6",
+    "quill-mention": "3.3.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "tailwindcss": "^3.4.13",
+    "@tailwindcss/forms": "^0.5.7",
+    "@tailwindcss/container-queries": "^0.1.1"
+  }
+}

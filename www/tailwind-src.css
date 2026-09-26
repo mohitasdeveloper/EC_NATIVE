@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Safe-area insets (status bar / gesture bar) — single source of truth.
+   Capacitor's SystemBars plugin injects --safe-area-inset-* because
+   Android WebView < 140 reports wrong env(safe-area-inset-*) values on
+   edge-to-edge (targetSdk 35+) builds; env() is the fallback for iOS /
+   newer WebViews. Use var(--sat) / var(--sab) everywhere, never env().
+   ============================================================ */
+@layer base {
+    :root {
+        --sat: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+        --sab: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+    }
+}
+
+/* ============================================================
+   Component classes — ported from the inline
+   <style type="text/tailwindcss"> blocks that used to live in
+   index.html, auth/login.html and auth/signup.html when Tailwind
+   ran as an in-browser CDN compiler. Compiled once here instead,
+   shared across every page via the single tailwind.css output.
+   ============================================================ */
+@layer components {
+    /* from index.html */
+    .btn-primary {
+        @apply bg-primary text-white px-5 py-3 rounded-xl font-bold flex justify-center items-center gap-1 active:scale-95 transition-all shadow-md shadow-primary/25 disabled:bg-primary/50 disabled:cursor-not-allowed;
+    }
+    .btn-secondary {
+        @apply bg-surface-variant/50 dark:bg-surface-variant/10 text-on-surface dark:text-gray-100 px-5 py-3 rounded-xl font-bold flex justify-center items-center gap-2 active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed;
+    }
+    .btn-error {
+        @apply bg-error text-white px-5 py-3 rounded-xl font-bold flex justify-center items-center gap-1 active:scale-95 transition-all shadow-md shadow-error/25 disabled:bg-error/50 disabled:cursor-not-allowed;
+    }
+
+    /* Material Symbols icon font. Lives in the components layer so that
+       size utilities (text-[14px], text-[18px], text-xl ...) override the
+       24px default. See the note in fonts/fonts.css. */
+    .material-symbols-outlined {
+        font-family: 'Material Symbols Outlined';
+        font-weight: normal;
+        font-style: normal;
+        font-size: 24px;
+        line-height: 1;
+        letter-spacing: normal;
+        text-transform: none;
+        display: inline-block;
+        white-space: nowrap;
+        word-wrap: normal;
+        direction: ltr;
+        flex-shrink: 0;
+        -webkit-font-feature-settings: 'liga';
+        font-feature-settings: 'liga';
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+
+    /* Opaque, fixed strip exactly as tall as the status bar. Content can
+       never scroll into it (it sits above the page, below every modal). */
+    .status-bar-guard {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: var(--sat);
+        background-color: #f8f9fa;
+        z-index: 60;
+        pointer-events: none;
+    }
+    .dark .status-bar-guard {
+        background-color: #121212;
+    }
+
+    /* from auth/login.html + auth/signup.html */
+    .input-field {
+        @apply w-full bg-surface-variant/20 dark:bg-neutral-900/50 border border-surface-variant/50 dark:border-neutral-700 rounded-xl p-3.5 text-[15px] font-medium text-on-surface dark:text-gray-100 outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all placeholder-on-surface-variant/50 dark:placeholder-gray-500;
+    }
+    .input-label {
+        @apply text-[11px] font-bold text-on-surface-variant dark:text-gray-400 uppercase tracking-wider mb-1.5 block ml-1;
+    }
+}
+
+/* Quill Editor Customizations (from index.html) */
+.ql-toolbar.ql-snow, .ql-container.ql-snow {
+    border-color: rgba(156, 163, 175, 0.3) !important;
+}
+.dark .ql-toolbar.ql-snow .ql-picker,
+.dark .ql-toolbar.ql-snow .ql-stroke {
+    color: #f3f4f6 !important;
+    stroke: #f3f4f6 !important;
+}
+.dark .ql-toolbar.ql-snow .ql-fill {
+    fill: #f3f4f6 !important;
+}
+.dark .ql-editor.ql-blank::before {
+    color: rgba(255,255,255,0.4) !important;
+}
+
+/* Fix Rich Text formatting overridden by Tailwind (from index.html) */
+.rich-text-content b, .rich-text-content strong { font-weight: bold; }
+.rich-text-content i, .rich-text-content em { font-style: italic; }
+.rich-text-content u { text-decoration: underline; }
+.rich-text-content s, .rich-text-content strike { text-decoration: line-through; }
+.rich-text-content ul { list-style-type: disc; padding-left: 1.5rem; margin-top: 0.5rem; margin-bottom: 0.5rem; }
+.rich-text-content ol { list-style-type: decimal; padding-left: 1.5rem; margin-top: 0.5rem; margin-bottom: 0.5rem; }
+.rich-text-content a { color: #006e1c; text-decoration: underline; }
+.dark .rich-text-content a { color: #78dc77; }
+
+/* from auth/login.html + auth/signup.html */
+/* NOTE: keyframes are named authFadeIn (not fadeIn) on purpose. style.css
+   already defines a different `fadeIn` (scale-in, used by .animate-fadeIn on
+   modals); tailwind.css loads later, so re-using the name silently replaced
+   the modal animation across the whole app. */
+.fade-in {
+    animation: authFadeIn 0.4s ease-out;
+}
+@keyframes authFadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
