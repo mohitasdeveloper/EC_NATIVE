@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport" />
+    <title>ECampus – Log In or Sign Up</title>
+
+    <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+
+    <!-- Apply the theme before first paint (same rule as index.html, so the
+         auth screen always matches the rest of the app — including the
+         "follow the system theme until the user picks one" default). -->
+    <script>
+        (function () {
+            var dark = false;
+            try {
+                dark = localStorage.getItem('theme') === 'dark' ||
+                    (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches);
+            } catch (e) { /* storage blocked — stay light */ }
+            document.documentElement.classList.toggle('dark', dark);
+        })();
+    </script>
+
+    <!-- Same stylesheet stack as index.html: global app CSS, compiled Tailwind
+         (see ../tailwind-src.css), self-hosted fonts. -->
+    <link rel="stylesheet" href="../style.css">
+    <link rel="stylesheet" href="../tailwind.css">
+    <link rel="stylesheet" href="../fonts/fonts.css">
+
+    <script src="../vendor/supabase.js" defer></script>
+</head>
+
+<body class="bg-surface dark:bg-[#121212] text-on-surface dark:text-gray-100 antialiased">
+
+    <!-- Fixed, opaque status-bar strip: the page scrolls beneath it, never into it. -->
+    <div class="status-bar-guard" aria-hidden="true"></div>
+
+    <main class="min-h-[100dvh] w-full flex flex-col items-center px-5 pt-[calc(var(--sat)+1.5rem)] pb-[calc(var(--sab)+2rem)]">
+
+        <div class="w-full max-w-md sm:bg-surface-container-lowest sm:dark:bg-[#1e1e1e] sm:shadow-2xl sm:p-8 sm:rounded-[32px] sm:border sm:border-surface-variant/40 sm:dark:border-neutral-800">
+
+            <!-- Brand + heading (heading text changes with the mode) -->
+            <header id="auth-header" class="w-full flex flex-col items-center text-center mb-6">
+                <img src="https://i.ibb.co/394HcGWn/Eco-Birla-3-modified.png" width="64" height="64" class="w-16 h-16 mb-2" alt="EcoBirla logo">
+                <span style="font-family:'Courgette',cursive;" class="text-[44px] leading-tight bg-gradient-to-r from-[#00C853] via-[#00A2FF] to-[#2962FF] bg-clip-text text-transparent select-none mb-2 pb-1">
+                    ECampus
+                </span>
+                <h1 id="auth-title" class="text-[26px] font-extrabold tracking-tight text-on-surface dark:text-gray-100 mb-1">Welcome Back!</h1>
+                <p id="auth-subtitle" class="text-[15px] font-medium text-on-surface-variant dark:text-gray-400">Please sign in to continue</p>
+            </header>
+
+            <!-- Log In / Sign Up toggle -->
+            <div id="auth-toggle" role="tablist" aria-label="Choose log in or sign up"
+                 class="relative grid grid-cols-2 p-1 mb-6 rounded-2xl bg-surface-variant/40 dark:bg-neutral-800/80">
+                <span id="auth-toggle-pill" aria-hidden="true"
+                      class="absolute top-1 bottom-1 left-1 w-[calc(50%-4px)] rounded-xl bg-surface-container-lowest dark:bg-[#2c2c2c] shadow-sm transition-transform duration-300 ease-out"></span>
+                <button type="button" role="tab" id="tab-login" aria-controls="panel-login" aria-selected="true" data-mode="login"
+                        class="relative z-10 py-2.5 rounded-xl text-[14px] font-extrabold transition-colors text-on-surface dark:text-white">Log In</button>
+                <button type="button" role="tab" id="tab-signup" aria-controls="panel-signup" aria-selected="false" data-mode="signup"
+                        class="relative z-10 py-2.5 rounded-xl text-[14px] font-extrabold transition-colors text-on-surface-variant dark:text-gray-400">Sign Up</button>
+            </div>
+
+            <!-- Error / success banner -->
+            <div id="auth-message" role="alert" aria-live="polite" class="hidden"></div>
+
+            <!-- ============ LOG IN ============ -->
+            <section id="panel-login" role="tabpanel" aria-labelledby="tab-login">
+                <form id="login-form" class="w-full flex flex-col gap-5" novalidate>
+                    <div>
+                        <label for="login-identifier" class="input-label">Email or Student ID</label>
+                        <input type="text" id="login-identifier" class="input-field" placeholder="student@college.edu or 123456"
+                               autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
+                    </div>
+
+                    <div>
+                        <label for="login-password" class="input-label">Password</label>
+                        <div class="relative">
+                            <input type="password" id="login-password" class="input-field pr-12" placeholder="••••••••" autocomplete="current-password">
+                            <button type="button" class="pw-toggle absolute inset-y-0 right-0 w-12 flex items-center justify-center text-on-surface-variant dark:text-gray-400"
+                                    data-target="login-password" aria-label="Show password">
+                                <span class="material-symbols-outlined text-[20px]">visibility</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <button type="submit" id="login-button" class="btn-primary w-full mt-2 py-4 text-[16px] font-extrabold shadow-lg">
+                        <span class="btn-text">Log In</span>
+                        <span class="btn-spinner material-symbols-outlined hidden animate-spin text-[22px]">progress_activity</span>
+                    </button>
+                </form>
+            </section>
+
+            <!-- ============ SIGN UP ============ -->
+            <section id="panel-signup" role="tabpanel" aria-labelledby="tab-signup" class="hidden">
+                <form id="signup-form" class="w-full flex flex-col gap-5" novalidate>
+
+                    <div>
+                        <span class="input-label">College</span>
+                        <div class="input-field flex items-center gap-2 opacity-70 bg-gray-100 dark:bg-neutral-800 cursor-not-allowed">
+                            <span class="material-symbols-outlined text-[20px] text-on-surface-variant">school</span>
+                            <span class="truncate">B. K. Birla Night College</span>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="signup-fullname" class="input-label">Full Name</label>
+                        <input type="text" id="signup-fullname" class="input-field" placeholder="John Doe" autocomplete="name">
+                    </div>
+
+                    <div>
+                        <label for="signup-email" class="input-label">Email</label>
+                        <input type="email" id="signup-email" class="input-field" placeholder="you@example.com"
+                               autocomplete="email" autocapitalize="none" autocorrect="off" spellcheck="false">
+                    </div>
+
+                    <div>
+                        <label for="signup-password" class="input-label">Password</label>
+                        <div class="relative">
+                            <input type="password" id="signup-password" class="input-field pr-12" placeholder="At least 6 characters" autocomplete="new-password">
+                            <button type="button" class="pw-toggle absolute inset-y-0 right-0 w-12 flex items-center justify-center text-on-surface-variant dark:text-gray-400"
+                                    data-target="signup-password" aria-label="Show password">
+                                <span class="material-symbols-outlined text-[20px]">visibility</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label for="signup-studentid" class="input-label">Student ID</label>
+                            <input type="text" id="signup-studentid" class="input-field" placeholder="12345678" autocomplete="off">
+                        </div>
+                        <div>
+                            <span class="input-label">Gender</span>
+                            <button type="button" id="signup-gender-btn" class="input-field flex items-center justify-between gap-2 text-left" aria-haspopup="dialog">
+                                <span id="signup-gender-label" class="truncate text-on-surface-variant/50 dark:text-gray-500">Select</span>
+                                <span class="material-symbols-outlined text-[20px] text-on-surface-variant dark:text-gray-400">expand_more</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <span class="input-label">Course</span>
+                        <button type="button" id="signup-course-btn" class="input-field flex items-center justify-between gap-2 text-left" aria-haspopup="dialog">
+                            <span id="signup-course-label" class="truncate text-on-surface-variant/50 dark:text-gray-500">Select your course</span>
+                            <span class="material-symbols-outlined text-[20px] text-on-surface-variant dark:text-gray-400">expand_more</span>
+                        </button>
+                    </div>
+
+                    <div>
+                        <label for="signup-mobile" class="input-label">Mobile</label>
+                        <input type="tel" id="signup-mobile" class="input-field" placeholder="+91 98765 43210" autocomplete="tel" inputmode="tel">
+                    </div>
+
+                    <div class="flex items-start gap-3 mt-1">
+                        <input type="checkbox" id="signup-terms"
+                               class="mt-0.5 w-5 h-5 text-primary bg-surface-variant/20 dark:bg-neutral-900/50 border border-surface-variant/50 dark:border-neutral-700 rounded focus:ring-primary focus:ring-1 outline-none cursor-pointer shrink-0">
+                        <label for="signup-terms" class="text-[13px] font-medium text-on-surface-variant dark:text-gray-400 leading-snug">
+                            I confirm that I am over 16 years of age and agree to the
+                            <a href="https://ecampus.mohitmali.in/privacy.html" target="_blank" rel="noopener" class="text-primary hover:underline font-bold">Privacy Policy</a> &amp;
+                            <a href="https://ecampus.mohitmali.in/terms.html" target="_blank" rel="noopener" class="text-primary hover:underline font-bold">Terms</a>.
+                        </label>
+                    </div>
+
+                    <button type="submit" id="signup-button" class="btn-primary w-full mt-2 py-4 text-[16px] font-extrabold shadow-lg">
+                        <span class="btn-text">Create Account</span>
+                        <span class="btn-spinner material-symbols-outlined hidden animate-spin text-[22px]">progress_activity</span>
+                    </button>
+                </form>
+            </section>
+
+            <!-- ============ DEACTIVATED ACCOUNT (shown by auth.js when needed) ============ -->
+            <section id="panel-reactivate" class="hidden flex-col items-center justify-center text-center w-full py-4">
+                <div class="w-16 h-16 bg-orange-500/10 text-orange-500 rounded-full flex items-center justify-center mb-4 mx-auto">
+                    <span class="material-symbols-outlined text-[32px]">manage_accounts</span>
+                </div>
+                <h2 class="text-2xl font-extrabold text-on-surface dark:text-gray-100 mb-2">Account Deactivated</h2>
+                <p class="text-[13px] text-on-surface-variant dark:text-gray-400 mb-6 px-4">Your account is currently deactivated. Would you like to reactivate it and restore your profile?</p>
+
+                <button type="button" id="reactivate-btn" class="btn-primary w-full mb-3">Yes, Reactivate Account</button>
+                <button type="button" id="cancel-reactivate-btn" class="btn-secondary w-full">Cancel &amp; Log Out</button>
+            </section>
+
+            <p class="text-center text-[12px] font-medium text-on-surface-variant/70 dark:text-gray-500 mt-8">
+                Having trouble? Contact EcoSquad for Support.
+            </p>
+        </div>
+    </main>
+
+    <!-- ============ PICKER SHEETS (options are built by auth.js) ============ -->
+    <div id="sheet-course" class="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm hidden flex-col justify-end" role="dialog" aria-modal="true" aria-labelledby="sheet-course-title">
+        <div class="bg-surface dark:bg-[#1e1e1e] w-full max-w-md mx-auto rounded-t-[32px] p-6 pb-[calc(var(--sab)+1.5rem)] relative animate-slideUp flex flex-col max-h-[85vh] shadow-[0_-10px_60px_rgba(0,0,0,0.5)]">
+            <button type="button" data-close-sheet aria-label="Close" class="absolute top-4 right-5 w-8 h-8 bg-surface-variant/50 dark:bg-neutral-800 rounded-full flex items-center justify-center text-on-surface dark:text-gray-100 active:scale-95 transition-transform">
+                <span class="material-symbols-outlined text-[18px]">close</span>
+            </button>
+            <h3 id="sheet-course-title" class="text-xl font-extrabold text-on-surface dark:text-gray-100 shrink-0 mb-4">Select Course</h3>
+            <div id="sheet-course-list" class="flex-1 overflow-y-auto pr-2 hide-scrollbar"></div>
+        </div>
+    </div>
+
+    <div id="sheet-gender" class="fixed inset-0 z-[200] bg-black/60 backdrop-blur-sm hidden flex-col justify-end" role="dialog" aria-modal="true" aria-labelledby="sheet-gender-title">
+        <div class="bg-surface dark:bg-[#1e1e1e] w-full max-w-md mx-auto rounded-t-[32px] p-6 pb-[calc(var(--sab)+1.5rem)] relative animate-slideUp flex flex-col shadow-[0_-10px_60px_rgba(0,0,0,0.5)]">
+            <button type="button" data-close-sheet aria-label="Close" class="absolute top-4 right-5 w-8 h-8 bg-surface-variant/50 dark:bg-neutral-800 rounded-full flex items-center justify-center text-on-surface dark:text-gray-100 active:scale-95 transition-transform">
+                <span class="material-symbols-outlined text-[18px]">close</span>
+            </button>
+            <h3 id="sheet-gender-title" class="text-xl font-extrabold text-on-surface dark:text-gray-100 shrink-0 mb-6">Select Gender</h3>
+            <div id="sheet-gender-list" class="space-y-3"></div>
+        </div>
+    </div>
+
+    <script type="module" src="auth.js"></script>
+</body>
+</html>
