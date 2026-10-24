@@ -1,0 +1,453 @@
+* {
+    -webkit-tap-highlight-color: transparent;
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    min-height: 100dvh;
+    overscroll-behavior-y: none;
+    transition: background-color 0.3s ease, color 0.3s ease;
+    
+    /* Locks the screen like a native app */
+    -webkit-user-select: none; 
+    user-select: none; 
+    -webkit-touch-callout: none; 
+}
+
+/* Ensures users can still type and edit text */
+input, textarea {
+    -webkit-user-select: auto !important;
+    user-select: auto !important;
+}
+
+/* Scrollbar Control */
+.hide-scrollbar::-webkit-scrollbar {
+    display: none;
+}
+
+.hide-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+/* Animations */
+@keyframes slideUp {
+    from { transform: translateY(100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: scale(0.95); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.animate-slideUp {
+    animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-fadeIn {
+    animation: fadeIn 0.2s ease-out forwards;
+}
+
+/* Dark Mode Inputs */
+.dark input[type="text"],
+.dark input[type="email"],
+.dark input[type="url"],
+.dark input[type="password"] {
+    background-color: #1e1e1e !important;
+    color: #f5f5f5 !important;
+    border-color: #333333 !important;
+}
+
+.glass-effect {
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+}
+
+/* Custom Modal Animations */
+@keyframes popIn {
+    0% { opacity: 0; transform: scale(0.9); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+.animate-popIn {
+    animation: popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* =========================================================
+   OFFLINE STRIP — "No Internet Connection" / "Back Online"
+   The strip lives in the space between the status bar and the content:
+   --sat (tailwind-src.css) grows by --offline-h while it shows, so every
+   header / view moves down by the strip's height and nothing is covered.
+   ========================================================= */
+:root.offline-strip { --offline-h: 1.75rem; }
+
+#smart-offline-banner {
+    position: fixed;
+    top: var(--sat-raw, 0px);
+    left: 0;
+    right: 0;
+    height: var(--offline-h);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.025em;
+    line-height: 1;
+    transition: background-color 0.3s;
+}
+#smart-offline-banner.hidden { display: none; }
+
+/* =========================================================
+   NATIVE SAFE AREA (NOTCH & HOME BAR) SUPPORT
+   ========================================================= */
+.safe-pt {
+    padding-top: var(--sat) !important;
+}
+
+.safe-pb {
+    padding-bottom: max(1.5rem, var(--sab)) !important;
+}
+
+.modal-header-safe {
+    padding-top: var(--sat) !important;
+    min-height: calc(4rem + var(--sat));
+}
+
+/* =========================================================
+   PROFESSIONAL SHIMMER LOADING ENGINE
+   ========================================================= */
+@keyframes shimmer {
+    0% { background-position: -1000px 0; }
+    100% { background-position: 1000px 0; }
+}
+
+.shimmer-bg {
+    background: linear-gradient(to right, rgba(130, 130, 130, 0.1) 8%, rgba(130, 130, 130, 0.25) 18%, rgba(130, 130, 130, 0.1) 33%);
+    background-size: 1000px 100%;
+    animation: shimmer 2s infinite linear forwards;
+}
+
+.dark .shimmer-bg {
+    background: linear-gradient(to right, rgba(255, 255, 255, 0.05) 8%, rgba(255, 255, 255, 0.12) 18%, rgba(255, 255, 255, 0.05) 33%);
+    background-size: 1000px 100%;
+    animation: shimmer 2s infinite linear forwards;
+}
+
+/* The satisfying Like Pop Animation */
+.like-pop {
+    animation: heartPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+}
+@keyframes heartPop {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.3); }
+    100% { transform: scale(1); }
+}
+
+/* =========================================================
+   MODERN CONTEXT-AWARE PULL-TO-REFRESH STYLES
+   ========================================================= */
+@keyframes ptr-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.ptr-loading-icon {
+    animation: ptr-spin 0.8s linear infinite !important;
+    color: #6200ee !important; 
+}
+
+#ptr-container {
+    user-select: none;
+    -webkit-user-select: none;
+    will-change: transform, opacity;
+}
+
+.ptr-dragging-active {
+    overscroll-behavior-y: contain !important;
+    touch-action: pan-y !important;
+}
+
+/* =========================================================
+   QUILL.JS MENTIONS LISTVIEW ENHANCEMENT
+   ========================================================= */
+.ql-mention-list-container {
+    width: 260px !important;
+    border: 1px solid rgba(150, 150, 150, 0.2) !important;
+    border-radius: 16px !important;
+    background-color: #ffffff !important;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1) !important;
+    overflow: hidden !important;
+    z-index: 200 !important;
+    padding: 4px !important;
+}
+
+.dark .ql-mention-list-container {
+    background-color: #1e1e1e !important;
+    border-color: #333333 !important;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5) !important;
+}
+
+.ql-mention-list-item {
+    padding: 10px 12px !important;
+    cursor: pointer !important;
+    border-radius: 12px !important;
+    transition: background-color 0.2s ease, transform 0.1s;
+    margin-bottom: 2px;
+}
+
+.ql-mention-list-item:last-child {
+    margin-bottom: 0;
+}
+
+.ql-mention-list-item.selected,
+.ql-mention-list-item:hover {
+    background-color: rgba(0, 110, 28, 0.1) !important; /* Primary color hint */
+    transform: scale(0.98);
+}
+
+.dark .ql-mention-list-item.selected,
+.dark .ql-mention-list-item:hover {
+    background-color: rgba(120, 220, 119, 0.15) !important;
+}
+
+/* Fix mention tag pill inside the actual text editor */
+.mention {
+    background-color: rgba(0, 110, 28, 0.15);
+    color: #006e1c;
+    padding: 2px 6px;
+    border-radius: 6px;
+    font-weight: bold;
+}
+
+.dark .mention {
+    background-color: rgba(120, 220, 119, 0.2);
+    color: #78dc77;
+}
+/* =========================================================
+   INTERACTIVE FEED & COMMENT MENTIONS (Instagram Style)
+   ========================================================= */
+.rich-text-content .mention {
+    background-color: transparent !important;
+    color: #006e1c;
+    padding: 0 !important;
+    border-radius: 0 !important;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity 0.2s ease;
+    text-decoration: none !important;
+    display: inline;
+}
+
+.rich-text-content .mention:hover {
+    background-color: transparent !important;
+    opacity: 0.7;
+    transform: none !important;
+}
+
+.dark .rich-text-content .mention {
+    background-color: transparent !important;
+    color: #78dc77;
+}
+
+/* Ensure the @ symbol inside the mention matches the styling */
+.rich-text-content .mention .ql-mention-denotation-char {
+    margin-right: 0px;
+}
+
+/* =========================================================
+   MINI QUILL EDITOR FOR COMMENTS
+   ========================================================= */
+#comment-rich-text-wrapper .ql-container.ql-snow {
+    border: none !important;
+    font-family: inherit;
+    font-size: 13px;
+}
+#comment-rich-text-wrapper .ql-editor {
+    padding: 12px 16px;
+    min-height: 44px;
+    max-height: 100px;
+    overflow-y: auto;
+}
+#comment-rich-text-wrapper .ql-editor.ql-blank::before {
+    left: 16px;
+    font-style: normal;
+    font-weight: 500;
+    color: rgba(150,150,150,0.8);
+}
+/* =========================================================
+   QUILL TOOLBAR MOBILE FIXES
+   ========================================================= */
+.ql-toolbar.ql-snow {
+    display: block !important;
+    border: none !important;
+    border-bottom: 1px solid rgba(150, 150, 150, 0.2) !important;
+    background-color: transparent !important;
+    padding: 10px 8px !important;
+    white-space: normal !important; /* Prevents wrapping bugs on mobile */
+    border-radius: 16px 16px 0 0 !important;
+}
+
+.ql-container.ql-snow {
+    border: none !important;
+}
+
+/* Ensure toolbar buttons have enough touch space */
+.ql-toolbar.ql-snow button {
+    width: 32px !important;
+    height: 32px !important;
+    margin-right: 2px !important;
+}
+
+/* Comment Swipe-to-Delete Physics */
+.comment-swipe-container {
+    position: relative;
+    overflow: hidden;
+    touch-action: pan-y;
+}
+.comment-swipe-track {
+    position: relative;
+    z-index: 10;
+    transition: transform 0.2s ease-out;
+    background-color: inherit;
+}
+.comment-delete-bg {
+    position: absolute;
+    top: 0;
+    right: 0;
+    height: 100%;
+    width: 100%;
+    background-color: #ff3b30;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 20px;
+    z-index: 1;
+}
+/* Prevent text highlighting when tapping mentions */
+.rich-text-content .mention {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   MINI APPS — circle tray on Home + the full-screen host (mini-apps.js)
+   ══════════════════════════════════════════════════════════════ */
+.mini-apps-tray {
+    display: flex;
+    gap: 18px;
+    overflow-x: auto;
+    padding: 4px 4px 2px;
+}
+.mini-app-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 7px;
+    width: 88px;
+    flex-shrink: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    cursor: pointer;
+    transition: transform .15s ease;
+}
+.mini-app-item:active { transform: scale(.93); }
+
+/* gradient ring (same colours as the ECampus wordmark) around a round icon face */
+.mini-app-circle {
+    display: flex;
+    width: 88px;
+    height: 88px;
+    padding: 3px;
+    border-radius: 9999px;
+    background: linear-gradient(135deg, #00C853, #00A2FF, #2962FF);
+}
+.mini-app-face {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 9999px;
+    border: 3px solid #f8f9fa;
+    background: #ffffff;
+}
+.dark .mini-app-face { border-color: #121212; background: #1e1e1e; }
+/* default (until the image has loaded): the largest square that fits a circle. Once loaded, mini-apps.js sizes
+   a non-square icon to the largest box of ITS aspect ratio that fits (never cropped) and adds .is-square
+   for square icons → full bleed. */
+.mini-app-face img { width: 70.7%; height: 70.7%; object-fit: contain; }
+.mini-app-circle.is-square .mini-app-face img { width: 100%; height: 100%; object-fit: cover; }
+/* Specific on purpose: Tailwind's .material-symbols-outlined { display: inline-block } is loaded AFTER this
+   file and would otherwise un-hide the fallback icon next to the image. */
+.mini-app-face .mini-app-fallback { display: none; font-size: 38px; color: #2962FF; }
+.mini-app-circle.is-broken .mini-app-face img { display: none; }
+.mini-app-circle.is-broken .mini-app-face .mini-app-fallback { display: flex; }
+/* a Page's mini app without an icon (or whose icon failed): its first letter */
+.mini-app-face .mini-app-fallback.mini-app-initial { font-size: 36px; font-weight: 800; line-height: 1; }
+.mini-app-circle.is-broken .mini-app-face .mini-app-fallback.mini-app-initial { align-items: center; justify-content: center; }
+
+/* "Manage" circle (Page accounts): dashed outline with a plus, no gradient ring */
+.mini-app-circle.is-manage { padding: 0; background: transparent; }
+.mini-app-circle.is-manage .mini-app-face { border: 2px dashed #9aa0a6; background: transparent; color: #5f6368; }
+.dark .mini-app-circle.is-manage .mini-app-face { border-color: #5f6368; color: #9aa0a6; }
+.mini-app-circle.is-manage .material-symbols-outlined { font-size: 36px; }
+
+.mini-app-label {
+    max-width: 88px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #3c4043;
+}
+.dark .mini-app-label { color: #d1d5db; }
+
+/* Full-screen host. Top padding = status bar only (--sat-raw, not --sat), so — like the PDF viewer —
+   it also covers the "No Internet Connection" strip. z-120: above header/nav (≤60), below every
+   modal and panel (≥150), so those can still open on top of a mini app. */
+#modal-mini-app {
+    position: fixed;
+    inset: 0;
+    z-index: 120;
+    display: flex;
+    flex-direction: column;
+    padding-top: var(--sat-raw, env(safe-area-inset-top, 0px));
+    background: #F8F9FA;
+    transform: translateY(100%);
+    transition: transform .26s cubic-bezier(.2, .8, .2, 1);
+    will-change: transform;
+}
+.dark #modal-mini-app { background: #121212; }
+#modal-mini-app.hidden { display: none; }
+#modal-mini-app.is-open { transform: none; }
+
+#mini-app-body {
+    flex: 1;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+}
+.mini-app-loading { display: grid; gap: 12px; padding: 16px; }
+.mini-app-error {
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    padding: 64px 24px; text-align: center; color: #5f6368; font-weight: 600;
+}
+.dark .mini-app-error { color: #9aa0a6; }
+.mini-app-error .material-symbols-outlined { font-size: 40px; }
+.mini-app-error button {
+    padding: 10px 22px; border-radius: 9999px; background: #2962FF; color: #fff; font-weight: 700;
+}

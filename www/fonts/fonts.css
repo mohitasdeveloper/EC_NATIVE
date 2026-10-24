@@ -1,0 +1,96 @@
+/* ==========================================================================
+   Self-hosted fonts for ECampus
+   --------------------------------------------------------------------------
+   Replaces these Google Fonts CDN <link> tags that used to live in
+   index.html (kept offline-unsafe fonts out of the critical path):
+
+     https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Courgette&display=swap
+     https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=block
+
+   The .woff2 files referenced below need to be generated once (see
+   /fonts/README.md and /fonts/get-fonts.py) and placed in this folder.
+   Once present, sw.js precaches them on install so icons/text never fall
+   back to plain glyphs/labels when the app is opened offline.
+   ========================================================================== */
+
+/* ---------------- Inter (weights 300 / 400 / 500 / 600 / 700 / 800) ---------------- */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('./inter-300.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./inter-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./inter-500.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./inter-600.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./inter-700.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url('./inter-800.woff2') format('woff2');
+}
+
+/* ---------------- Courgette (used for the ECampus wordmark) ---------------- */
+
+@font-face {
+  font-family: 'Courgette';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./courgette-400.woff2') format('woff2');
+}
+
+/* ---------------- Material Symbols Outlined (variable: wght 100-700, FILL 0-1) ---------------- */
+/* font-display: block matches the original Google Fonts link (display=block),
+   so icon glyphs never flash as plain fallback text (e.g. "home", "search")
+   even on a fast connection - and now also works fully offline. */
+
+@font-face {
+  font-family: 'Material Symbols Outlined';
+  font-style: normal;
+  font-weight: 100 700;
+  font-display: block;
+  src: url('./material-symbols-outlined.woff2') format('woff2');
+}
+
+/* NOTE: the .material-symbols-outlined *class* (24px default size, ligature
+   settings, FILL/wght axes) lives in ../tailwind-src.css under
+   @layer components — NOT here. It used to live here, and because this
+   file is linked AFTER tailwind.css its `font-size: 24px` beat every
+   Tailwind size utility (text-[14px], text-[18px] ...) of equal
+   specificity, so every icon in the app rendered at 24px whatever size
+   the markup asked for. In the components layer, Tailwind utilities
+   always win, which is what the markup assumes. */
